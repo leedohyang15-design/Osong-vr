@@ -41,6 +41,8 @@ select { appearance: none; background: var(--ink-2); color: var(--paper); border
 .transport { display: flex; gap: 6px; align-items: center; }
 .tbtn { appearance: none; cursor: pointer; border: 1px solid var(--rule-2); background: none; padding: 9px 14px; font-size: 14px; }
 .tbtn.primary { background: var(--paper); color: var(--ink); border-color: var(--paper); font-weight: 600; }
+.tbtn.big { flex: 1; padding: 13px 16px; font-size: 16px; }
+.cue { margin: 0 0 12px; padding: 10px 12px; border-left: 2px solid var(--brass); background: rgba(214, 178, 122, 0.08); font-size: 16px; font-weight: 500; }
 .tbtn:disabled { opacity: 0.35; cursor: default; }
 .tpos { margin-left: auto; font-family: var(--mono); font-size: 13px; color: var(--muted); }
 .tpos b { font-weight: 500; color: var(--paper); font-size: 16px; }

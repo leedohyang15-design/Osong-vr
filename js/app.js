@@ -202,23 +202,25 @@
   // ---------- shows: local playback or following the presenter ----------
   var room = (QS.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   var guest = null;
-  var local = null; // { id, start } when playing a show alone
+  var local = null; // { id, scene, start } when playing a show alone: scenes advance by themselves
   var showOn = false, showJoin = 0, joinCam = null, showYaw = 0, vrStep = { index: -1, goal: 0 };
+  var LOCAL_HOLD = 14; // seconds a scene stays up after its animation when playing alone
   function activeShow() {
     if (guest) {
-      var s = guest.state();
-      if (s && s.show && s.status !== 'idle') {
-        var show = ShowTimeline.byId(s.show), t = guest.position();
-        if (show && t != null && t <= show.duration + 1.5) { local = null; return { show: show, t: Math.max(0, t), paused: s.status === 'paused', synced: true }; }
-      }
+      var g = guest.position();
+      if (g) { var gs = ShowTimeline.byId(g.show); if (gs) { local = null; return { show: gs, scene: g.scene, t: g.t, synced: true }; } }
     }
     if (local) {
       var ls = ShowTimeline.byId(local.id), lt = (performance.now() - local.start) / 1000;
-      if (lt > ls.duration + 1.5) { local = null; return null; }
-      return { show: ls, t: lt, paused: false, synced: false };
+      if (lt > ShowTimeline.settleTime(ls.scenes[local.scene]) + LOCAL_HOLD) {
+        if (local.scene + 1 >= ls.scenes.length) { local = null; return null; }
+        local.scene++; local.start = performance.now(); lt = 0;
+      }
+      return { show: ls, scene: local.scene, t: lt, synced: false };
     }
     return null;
   }
+  function playLocal(id) { local = { id: id, scene: 0, start: performance.now() }; }
   function onShowStart(a) {
     showOn = true; showJoin = performance.now(); vrStep.index = -1;
     joinCam = { yaw: st.yaw, pitch: st.pitch, fov: st.zoomFov };
@@ -255,10 +257,10 @@
       el.className = 'show-item';
       el.innerHTML = '<h3></h3><button type="button" class="btn-line">혼자 보기</button><p></p>';
       el.querySelector('h3').textContent = s.title + ' ';
-      var len = document.createElement('span'); len.className = 'len'; len.textContent = fmtLen(s.duration);
+      var len = document.createElement('span'); len.className = 'len'; len.textContent = s.scenes.length + '장면';
       el.querySelector('h3').appendChild(len);
       el.querySelector('p').textContent = s.blurb;
-      el.querySelector('button').addEventListener('click', function () { local = { id: s.id, start: performance.now() }; });
+      el.querySelector('button').addEventListener('click', function () { playLocal(s.id); });
       list.appendChild(el);
     });
   })();
@@ -267,7 +269,6 @@
   var LIVE_TEXT = {
     connecting: '진행자 화면에 연결하는 중',
     connected: '진행자와 연결됐어요. 쇼가 시작되면 자동으로 따라가요.',
-    waiting: '진행자 화면을 찾는 중이에요. 노트북 화면이 켜져 있는지 확인해 주세요.',
     reconnecting: '연결이 끊겨서 다시 잇는 중이에요'
   };
   function setLive(s) {
@@ -289,7 +290,7 @@
     var a = activeShow();
     if (a && !showOn) onShowStart(a);
     if (!a && showOn) onShowEnd();
-    var ev = a ? ShowTimeline.evaluate(eng, a.show, a.t) : null;
+    var ev = a ? ShowTimeline.evaluate(eng, a.show, a.scene, a.t) : null;
 
     if (ev) { st.minutes = ev.minutes; syncTime(); }
     else if (st.speed > 0 && st.mode !== 'menu') {
@@ -344,12 +345,14 @@
       reticle: st.mode !== 'menu', panel: PANEL
     };
     if (ev) {
-      o.highlight = ev.highlight; o.hlAlpha = ev.hlAlpha; o.figures = ev.figures; o.pointer = ev.pointer;
+      o.highlight = ev.highlight; o.figures = ev.figures; o.pointer = ev.pointer;
+      o.lineCons = ev.lineCons; o.labelAlpha = ev.labelAlpha; o.trails = ev.trails; o.eyepiece = ev.eyepiece;
+      if (ev.lim != null) o.lim = ev.lim;
       var M = C.eqjToEnu(window.SKY, ev.minutes), e = ev.endTargetEnu;
       o.guide = st.mode === 'vr' ? [M[0][0] * e[0] + M[1][0] * e[1] + M[2][0] * e[2], M[0][1] * e[0] + M[1][1] * e[1] + M[2][1] * e[2], M[0][2] * e[0] + M[1][2] * e[1] + M[2][2] * e[2]] : null;
       if (st.mode === 'vr') {
         o.caption = ev.caption;
-        o.top = a.show.title + ' · ' + (ev.index + 1) + '/' + a.show.steps.length + (a.paused ? ' · 일시정지' : '');
+        o.top = (ev.index + 1) + ' / ' + a.show.scenes.length + '  ' + a.show.title;
       }
     } else {
       var hcons = sel ? (sel.cons || sel.near) : null;
@@ -399,7 +402,7 @@
     var key = ev.caption.title + ev.caption.sub;
     if (key !== lastCap) { lastCap = key; $('capTitle').textContent = ev.caption.title; $('capSub').textContent = ev.caption.sub; }
     cap.style.opacity = ev.caption.alpha.toFixed(3);
-    $('capBar').style.width = (100 * clamp(a.t / a.show.duration, 0, 1)).toFixed(1) + '%';
+    $('capBar').style.width = (100 * (a.scene + 1) / a.show.scenes.length).toFixed(1) + '%';
   }
 
   // ---------- menu wiring ----------
@@ -592,5 +595,5 @@
   }
   requestAnimationFrame(loop);
   window.__sky = { st: st, eng: eng, gaze: function () { return gaze; }, figs: function () { return figs; }, guest: function () { return guest; },
-    setRaw: function (cam) { rawCam = cam; st.sensorSeen = true; }, playLocal: function (id) { local = { id: id, start: performance.now() }; } };
+    setRaw: function (cam) { rawCam = cam; st.sensorSeen = true; }, playLocal: playLocal };
 })();

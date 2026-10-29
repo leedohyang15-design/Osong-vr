@@ -1,0 +1,10 @@
+# Render blueprint: New + > Blueprint > pick this repository.
+services:
+  - type: web
+    name: osong-vr-sync
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /healthz

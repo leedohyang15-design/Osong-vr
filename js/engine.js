@@ -95,7 +95,52 @@ var SkyEngine = function (canvas) {
     return { v: new Float32Array(pts), lv: new Uint8Array(lv), step: STEP * D2R, levels: levels };
   })();
   var DSO = K.DSO.map(function (d) { return { name: d.name, text: d.text, v: C.radec2vec(d.ra, d.dec) }; });
-  var FIG = window.FIGURES || {};
+  // constellation illustrations (Johan Meuris / Stellarium), loaded on first use and tinted warm
+  var ART = window.FIGURE_ART || {};
+  function artFor(id) {
+    var A = ART[id]; if (!A) return null;
+    if (A.ready) return A;
+    if (!A.loading) {
+      A.loading = true;
+      var im = new Image();
+      im.onload = function () {
+        var cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+        var g = cv.getContext('2d');
+        g.drawImage(im, 0, 0);
+        g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgb(255,222,172)'; g.fillRect(0, 0, cv.width, cv.height);
+        A.canvas = cv; setupArt(A, im.naturalWidth / A.size[0]); A.ready = true;
+      };
+      im.src = A.file;
+    }
+    return null;
+  }
+  // image pixels -> sky: an affine map onto the tangent plane fixed by the three anchor stars, sampled on a grid
+  var ART_N = 6;
+  function setupArt(A, scale) {
+    var vs = A.anchors.map(function (a) { return C.radec2vec(a[2], a[3]); });
+    var c = norm([vs[0][0] + vs[1][0] + vs[2][0], vs[0][1] + vs[1][1] + vs[2][1], vs[0][2] + vs[1][2] + vs[2][2]]);
+    var e1 = norm(cross([0, 0, 1], c)); if (!isFinite(e1[0])) e1 = [1, 0, 0];
+    var e2 = cross(c, e1);
+    var T = vs.map(function (v) { var d = v[0] * c[0] + v[1] * c[1] + v[2] * c[2]; var t = [v[0] / d, v[1] / d, v[2] / d]; return [t[0] * e1[0] + t[1] * e1[1] + t[2] * e1[2], t[0] * e2[0] + t[1] * e2[1] + t[2] * e2[2]]; });
+    var S = A.anchors.map(function (a) { return [a[0] * scale, a[1] * scale]; });
+    var m = affine(S[0], S[1], S[2], T[0], T[1], T[2]);
+    var W = A.canvas.width, H = A.canvas.height, grid = [];
+    for (var j = 0; j <= ART_N; j++) for (var i = 0; i <= ART_N; i++) {
+      var px = i / ART_N * W, py = j / ART_N * H;
+      var X = m[0] * px + m[2] * py + m[4], Y = m[1] * px + m[3] * py + m[5];
+      grid.push(norm([c[0] + X * e1[0] + Y * e2[0], c[1] + X * e1[1] + Y * e2[1], c[2] + X * e1[2] + Y * e2[2]]));
+    }
+    A.grid = grid; A.W = W; A.H = H;
+  }
+  // affine [a,b,c,d,e,f] (canvas order) taking s0,s1,s2 to d0,d1,d2
+  function affine(s0, s1, s2, d0, d1, d2) {
+    var x1 = s1[0] - s0[0], y1 = s1[1] - s0[1], x2 = s2[0] - s0[0], y2 = s2[1] - s0[1];
+    var det = x1 * y2 - x2 * y1; if (Math.abs(det) < 1e-9) return null;
+    var u1 = d1[0] - d0[0], v1 = d1[1] - d0[1], u2 = d2[0] - d0[0], v2 = d2[1] - d0[1];
+    var a = (u1 * y2 - u2 * y1) / det, cc = (u2 * x1 - u1 * x2) / det;
+    var b = (v1 * y2 - v2 * y1) / det, d = (v2 * x1 - v1 * x2) / det;
+    return [a, b, cc, d, d0[0] - a * s0[0] - cc * s0[1], d0[1] - b * s0[0] - d * s0[1]];
+  }
 
   // horizon silhouette: low tree line with a few blocks of buildings toward Osong station (north-east)
   var TREE = new Float32Array(361);
@@ -330,34 +375,47 @@ var SkyEngine = function (canvas) {
   }
 
   function drawFigure(view, id, p, alpha) {
-    var F = FIG[id]; if (!F) return;
-    var target = F.total * clamp(p, 0, 1), done = 0;
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = Math.max(1, view.f / 520); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(232,214,178,0.78)';
-    ctx.beginPath();
-    for (var i = 0; i < F.paths.length && done < target; i++) {
-      var pts = F.paths[i], L = F.lens[i];
-      var left = target - done, acc = 0;
-      toCam(pts[0], CV);
-      for (var k = 1; k < pts.length; k++) {
-        var a = pts[k - 1], b = pts[k];
-        var seg = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-        var bb = b;
-        if (acc + seg > left) {
-          var t = (left - acc) / seg;
-          bb = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-        }
-        toCam(bb, CV2);
-        segPath(view, CV, CV2, 2);
-        CV[0] = CV2[0]; CV[1] = CV2[1]; CV[2] = CV2[2];
-        acc += seg;
-        if (acc >= left) break;
-      }
-      done += L;
+    var A = artFor(id); if (!A) return;
+    var a = alpha * clamp(p, 0, 1); if (a < 0.01) return;
+    var N = ART_N, sp = [], ok = [];
+    for (var k = 0; k < A.grid.length; k++) {
+      toCam(A.grid[k], CV);
+      ok[k] = proj(view, CV[0], CV[1], CV[2], P);
+      sp[k] = [P[0], P[1]];
     }
-    ctx.stroke();
+    var cw = A.W / N, ch = A.H / N, cl = view.clip;
+    // draw the mesh opaque into a scratch layer (overlapping edges then look seamless), then screen it on once
+    var pw = Math.ceil(cl[2] * DPR), ph = Math.ceil(cl[3] * DPR);
+    if (artLayer.width !== pw || artLayer.height !== ph) { artLayer.width = pw; artLayer.height = ph; }
+    var main = ctx; ctx = artCtx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, pw, ph);
+    artOff = [cl[0], cl[1]];
+    for (var j = 0; j < N; j++) for (var i = 0; i < N; i++) {
+      var i00 = j * (N + 1) + i, i10 = i00 + 1, i01 = i00 + N + 1, i11 = i01 + 1;
+      var s00 = [i * cw, j * ch], s10 = [(i + 1) * cw, j * ch], s01 = [i * cw, (j + 1) * ch], s11 = [(i + 1) * cw, (j + 1) * ch];
+      if (ok[i00] && ok[i10] && ok[i01]) artTri(A, s00, s10, s01, sp[i00], sp[i10], sp[i01], i * cw, j * ch, cw, ch);
+      if (ok[i10] && ok[i11] && ok[i01]) artTri(A, s10, s11, s01, sp[i10], sp[i11], sp[i01], i * cw, j * ch, cw, ch);
+    }
+    ctx = main;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = a * 0.55;
+    ctx.drawImage(artLayer, Math.round(cl[0] * DPR), Math.round(cl[1] * DPR));
+    ctx.restore();
+  }
+  var artLayer = document.createElement('canvas'), artCtx = artLayer.getContext('2d'), artOff = [0, 0];
+  function artTri(A, s0, s1, s2, d0, d1, d2, sx, sy, sw, sh) {
+    var m = affine(s0, s1, s2, d0, d1, d2); if (!m) return;
+    // grow the clip triangle by half a pixel so neighbouring cells meet without hairline gaps
+    var cx = (d0[0] + d1[0] + d2[0]) / 3, cy = (d0[1] + d1[1] + d2[1]) / 3;
+    function g(d) { var dx = d[0] - cx, dy = d[1] - cy, l = Math.hypot(dx, dy) || 1; return [d[0] + dx / l * 0.6, d[1] + dy / l * 0.6]; }
+    var a = g(d0), b = g(d1), c = g(d2);
+    ctx.save();
+    var ox = artOff[0], oy = artOff[1];
+    ctx.setTransform(DPR, 0, 0, DPR, -ox * DPR, -oy * DPR);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.closePath(); ctx.clip();
+    ctx.setTransform(DPR * m[0], DPR * m[1], DPR * m[2], DPR * m[3], DPR * (m[4] - ox), DPR * (m[5] - oy));
+    ctx.drawImage(A.canvas, Math.max(0, sx - 2), Math.max(0, sy - 2), sw + 4, sh + 4, Math.max(0, sx - 2), Math.max(0, sy - 2), sw + 4, sh + 4);
     ctx.restore();
   }
 
@@ -477,6 +535,8 @@ var SkyEngine = function (canvas) {
   var Q = [0, 0];
   function labels(view, o, fontPx, limit) {
     var sel = o.sel, hl = o.highlight;
+    ctx.globalAlpha = o.labelAlpha == null ? 1 : o.labelAlpha;
+    if (ctx.globalAlpha < 0.01) { ctx.globalAlpha = 1; return; }
     ctx.textBaseline = 'middle';
     if (o.show.dirs) directions(view, fontPx);
     for (var bg = 0; bg < frame.bodies.length; bg++) {
@@ -545,6 +605,77 @@ var SkyEngine = function (canvas) {
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath(); ctx.moveTo(-s * 0.6, -s); ctx.lineTo(s * 0.4, 0); ctx.lineTo(-s * 0.6, s); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(-s * 1.4, -s); ctx.lineTo(-s * 0.4, 0); ctx.lineTo(-s * 1.4, s); ctx.globalAlpha = 0.5; ctx.stroke();
+    ctx.restore();
+  }
+
+  // one constellation's stick figure drawn stroke by stroke (p 0..1)
+  function consLinesProgress(view, id, p, gapRad) {
+    var segs = [];
+    for (var i = 0; i < LINES.length; i++) if (LINES[i].id === id) for (var k = 1; k < LINES[i].pts.length; k++) segs.push([LINES[i].pts[k - 1], LINES[i].pts[k]]);
+    var budget = clamp(p, 0, 1) * segs.length;
+    for (var j = 0; j < segs.length && budget > 0; j++, budget--) {
+      var a = segs[j][0], b = segs[j][1], f = Math.min(1, budget);
+      var th = Math.acos(clamp(a[0] * b[0] + a[1] * b[1] + a[2] * b[2], -1, 1));
+      var t = th > 0 ? Math.min(0.3, gapRad / th) : 0, e = t + (1 - 2 * t) * f;
+      toCam([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t], CV);
+      toCam([a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e, a[2] + (b[2] - a[2]) * e], CV2);
+      segPath(view, CV, CV2, 6);
+    }
+  }
+  // star trails: where the bright stars were over the past few hours
+  function trails(view, tr, minutes) {
+    var steps = 28, span = tr.hours * 60 * tr.p, Ms = [];
+    for (var k = 0; k <= steps; k++) Ms.push(C.eqjToEnu(S, minutes - span * (1 - k / steps)));
+    ctx.save();
+    ctx.lineWidth = Math.max(0.8, view.f / 620);
+    for (var col = 0; col < 6; col++) {
+      ctx.strokeStyle = 'rgba(' + STAR_RGB[col].join(',') + ',0.42)';
+      ctx.beginPath();
+      for (var i = 0; i < NS; i++) {
+        if (SB[i] !== col || SM[i] > 3.6) continue;
+        var v = [SV[3 * i], SV[3 * i + 1], SV[3 * i + 2]], started = false;
+        for (var q = 0; q <= steps; q++) {
+          var e = C.apply(Ms[q], v);
+          if (e[2] < 0) { started = false; continue; }
+          enuToCam(e, CV);
+          if (!proj(view, CV[0], CV[1], CV[2], P)) { started = false; continue; }
+          if (!started) { ctx.moveTo(P[0], P[1]); started = true; } else ctx.lineTo(P[0], P[1]);
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // telescope eyepiece: the sky darkens outside a circle and the planet is drawn as it looks through a small telescope
+  function eyepiece(view, ep, fontPx) {
+    var a = clamp(ep.a, 0, 1), cl = view.clip;
+    var r = view.vr ? view.R * 0.42 : Math.min(cl[2], cl[3]) * 0.34;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(cl[0], cl[1], cl[2], cl[3]); ctx.arc(view.cx, view.cy, r, 0, Math.PI * 2, true);
+    ctx.fillStyle = 'rgba(0,0,0,' + 0.88 * a + ')'; ctx.fill();
+    ctx.beginPath(); ctx.arc(view.cx, view.cy, r, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = 'rgba(2,3,6,' + 0.9 * a + ')'; ctx.fillRect(view.cx - r, view.cy - r, r * 2, r * 2);
+    ctx.globalAlpha = a;
+    var rp = r * 0.2, tilt = -0.38, ra = rp * 2.25, rb = rp * 0.1;
+    ctx.translate(view.cx, view.cy); ctx.rotate(tilt);
+    function ring(back) {
+      ctx.beginPath(); ctx.ellipse(0, 0, ra, rb, 0, back ? Math.PI : 0, back ? Math.PI * 2 : Math.PI);
+      ctx.strokeStyle = 'rgba(226,206,160,0.9)'; ctx.lineWidth = Math.max(1.5, rp * 0.13); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 0, ra * 0.82, rb * 0.82, 0, back ? Math.PI : 0, back ? Math.PI * 2 : Math.PI);
+      ctx.strokeStyle = 'rgba(196,176,134,0.6)'; ctx.lineWidth = Math.max(1, rp * 0.07); ctx.stroke();
+    }
+    ring(true);
+    var g = ctx.createLinearGradient(0, -rp, 0, rp);
+    g.addColorStop(0, '#d9c28e'); g.addColorStop(0.35, '#ead8a8'); g.addColorStop(0.5, '#cdb47c'); g.addColorStop(0.62, '#e6d2a0'); g.addColorStop(1, '#a88f5c');
+    ctx.beginPath(); ctx.ellipse(0, 0, rp, rp * 0.9, 0, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0, rb * 1.6, rp, rb * 1.4, 0, 0, Math.PI * 2); ctx.fill(); // ring shadow
+    ring(false);
+    ctx.restore();
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.strokeStyle = 'rgba(200,190,170,0.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(view.cx, view.cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = Math.round(fontPx * 0.78) + 'px ' + MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(214,206,190,0.75)'; ctx.fillText('망원경 시야 · 약 100배', view.cx, view.cy + r + fontPx * 1.1);
     ctx.restore();
   }
 
@@ -693,24 +824,25 @@ var SkyEngine = function (canvas) {
     ctx.beginPath(); ctx.rect(view.clip[0], view.clip[1], view.clip[2], view.clip[3]); ctx.clip();
     skyBase(view);
     if (o.show.mw) milkyWay(view, o.lim);
-    var hl = o.highlight;
-    if (o.show.lines || hl) {
-      var gap = 0.7 * D2R;
-      ctx.lineWidth = Math.max(0.8, view.f / 560); ctx.lineCap = 'round';
-      if (o.show.lines) {
-        ctx.strokeStyle = 'rgba(140,158,200,0.3)';
-        ctx.beginPath();
-        for (var li = 0; li < LINES.length; li++) if (LINES[li].id !== hl) consLinePath(view, LINES[li].pts, gap);
-        ctx.stroke();
-      }
-      if (hl) {
-        ctx.lineWidth = Math.max(1.2, view.f / 380);
-        ctx.strokeStyle = 'rgba(236,206,150,' + (0.55 + 0.35 * (o.hlAlpha == null ? 1 : o.hlAlpha)) + ')';
-        ctx.beginPath();
-        for (var lj = 0; lj < LINES.length; lj++) if (LINES[lj].id === hl) consLinePath(view, LINES[lj].pts, gap);
-        ctx.stroke();
-      }
+    var hl = o.highlight, la = o.labelAlpha == null ? 1 : o.labelAlpha;
+    var gap = 0.7 * D2R, lit = {};
+    (o.lineCons || []).forEach(function (l) { lit[l.id] = l.p; });
+    if (hl && lit[hl] == null) lit[hl] = 1;
+    ctx.lineCap = 'round';
+    if (o.show.lines && la > 0.01) {
+      ctx.lineWidth = Math.max(0.8, view.f / 560);
+      ctx.strokeStyle = 'rgba(140,158,200,' + (0.3 * la) + ')';
+      ctx.beginPath();
+      for (var li = 0; li < LINES.length; li++) if (lit[LINES[li].id] == null) consLinePath(view, LINES[li].pts, gap);
+      ctx.stroke();
     }
+    for (var lid in lit) {
+      if (lit[lid] <= 0) continue;
+      ctx.lineWidth = Math.max(1.2, view.f / (lid === hl ? 380 : 460));
+      ctx.strokeStyle = 'rgba(236,206,150,' + (lid === hl ? 0.55 + 0.35 * (o.hlAlpha == null ? 1 : o.hlAlpha) : 0.6) + ')';
+      ctx.beginPath(); consLinesProgress(view, lid, lit[lid], gap); ctx.stroke();
+    }
+    if (o.trails && o.trails.p > 0) trails(view, o.trails, o.minutes);
     if (o.figures) for (var fid in o.figures) { var fp = o.figures[fid]; if (fp.p > 0.001) drawFigure(view, fid, fp.p, fp.a); }
     if (o.pointer && o.pointer.from && o.pointer.to && o.pointer.p > 0) pointerLine(view, o.pointer);
     stars(view, limit);
@@ -722,7 +854,9 @@ var SkyEngine = function (canvas) {
       if (o.card) view.boxes.push([view.cx - view.R * 0.58, view.cy + view.R * 0.15, view.cx + view.R * 0.58, view.cy + view.R * 0.15 + fontPx * 8]);
     }
     labels(view, o, fontPx, limit);
+    ctx.globalAlpha = 1;
     if (o.guide) guideArrow(view, o.guide, fontPx);
+    if (o.eyepiece && o.eyepiece.a > 0) eyepiece(view, o.eyepiece, fontPx);
     if (view.vr && o.panel && o.panel.open) drawPanel(view, o.panel, fontPx);
     // reticle
     if (o.reticle !== false) {
@@ -817,7 +951,7 @@ var SkyEngine = function (canvas) {
   return {
     render: render, resize: resize, pickTarget: pickTarget, panelHit: panelHit, scrollOffset: scrollOffset,
     frame: function () { return frame; },
-    consById: CONS_BY_ID, dso: DSO, hasFigure: function (id) { return !!FIG[id]; },
+    consById: CONS_BY_ID, dso: DSO, hasFigure: function (id) { return !!ART[id]; },
     // direction (J2000 vector) of a named thing, for shows
     vecOf: function (t) {
       if (t.cons && CONS_BY_ID[t.cons]) return CONS_BY_ID[t.cons].v;

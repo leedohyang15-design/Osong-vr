@@ -51,21 +51,21 @@
     <section class="con-block">
       <div class="con-label"><span>쇼</span><select id="showSel" aria-label="쇼 선택"></select></div>
       <div class="transport">
-        <button type="button" class="tbtn primary" id="playBtn">재생</button>
-        <button type="button" class="tbtn" id="pauseBtn">일시정지</button>
-        <button type="button" class="tbtn" id="stopBtn">정지</button>
-        <span class="tpos"><b id="pos">0:00</b> / <span id="dur">0:00</span></span>
+        <button type="button" class="tbtn" id="prevBtn">이전</button>
+        <button type="button" class="tbtn primary big" id="nextBtn">시작</button>
+        <button type="button" class="tbtn" id="stopBtn">끝내기</button>
+        <span class="tpos"><b id="sceneNo">-</b> / <span id="sceneCount">-</span></span>
       </div>
-      <div class="scrub" id="scrub"><i id="scrubFill"></i></div>
-      <p class="keys">스페이스 재생/일시정지 · ← → 이전/다음 장면 · Q QR 크게</p>
+      <p class="keys">→ 또는 스페이스 다음 장면 · ← 이전 장면 · Q QR 크게</p>
     </section>
 
     <section class="con-block script">
-      <div class="con-label"><span>지금 장면</span><span id="stepNo" class="mono"></span></div>
-      <h2 id="nowTitle">쇼를 고르고 재생을 누르세요</h2>
-      <p id="nowNote" class="note">재생하면 접속한 모든 휴대폰이 같은 장면으로 넘어가요. 늦게 들어온 사람도 바로 지금 장면에 맞춰져요.</p>
+      <div class="con-label"><span>지금 장면</span><span id="settle" class="mono"></span></div>
+      <h2 id="nowTitle">쇼를 고르고 시작을 누르세요</h2>
+      <p class="cue" id="nowCue" hidden></p>
+      <p id="nowNote" class="note">시작하면 접속한 모든 휴대폰이 같은 장면으로 넘어가요. 장면은 짧은 연출이 끝나면 멈춰서 기다리고, 다음 장면 버튼을 누를 때 넘어가요.</p>
       <div class="next" id="nextWrap" hidden>
-        <div class="con-label"><span>다음 장면</span><span id="nextIn" class="mono"></span></div>
+        <div class="con-label"><span>다음 장면</span></div>
         <p id="nextNote"></p>
       </div>
     </section>
@@ -89,12 +89,12 @@
   </div>
 </div>
 
-<script src="vendor/peerjs.min.js"></script>
+<script src="js/config.js"></script>
 <script src="vendor/qrcode.js"></script>
 <script src="js/sky-data.js"></script>
 <script src="js/sky-core.js"></script>
 <script src="js/content.js"></script>
-<script src="js/figures.js"></script>
+<script src="js/figures-data.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/shows.js"></script>
 <script src="js/sync.js"></script>
