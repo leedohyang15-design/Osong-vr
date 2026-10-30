@@ -27,9 +27,10 @@ var SkyEngine = function (canvas, glCanvas) {
     var g = cv.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
     var rgb = c.join(',');
     gr.addColorStop(0, 'rgba(255,255,255,1)');
-    gr.addColorStop(0.1, 'rgba(' + rgb + ',1)');
-    gr.addColorStop(0.2, 'rgba(' + rgb + ',0.6)');
-    gr.addColorStop(0.38, 'rgba(' + rgb + ',0.12)');
+    gr.addColorStop(0.16, 'rgba(255,255,255,1)');
+    gr.addColorStop(0.26, 'rgba(' + rgb + ',1)');
+    gr.addColorStop(0.36, 'rgba(' + rgb + ',0.4)');
+    gr.addColorStop(0.55, 'rgba(' + rgb + ',0.08)');
     gr.addColorStop(1, 'rgba(' + rgb + ',0)');
     g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
     return cv;
@@ -459,7 +460,7 @@ var SkyEngine = function (canvas, glCanvas) {
       var mEff = m + 0.22 * (1 / Math.max(up, 0.05) - 1); // extinction near the horizon
       var vis = limit - mEff;
       if (vis < -0.3) continue;
-      var alpha = clamp(0.32 + vis * 0.32, 0.22, 1);
+      var alpha = clamp(0.5 + vis * 0.3, 0.4, 1);
       if (up < 0.26) alpha *= 1 - 0.38 * (1 - up / 0.26) * (0.5 + 0.5 * Math.sin(tw * 6.3 + i * 1.71)); // scintillation
       var d = (3.0 + 2.1 * Math.max(0, limit + 0.8 - mEff)) * sizeK;
       var col = up < 0.12 ? Math.min(5, SB[i] + 1) : SB[i];
