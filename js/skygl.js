@@ -64,6 +64,32 @@ var SkyGL = function (canvas, url) {
   var U = {};
   ['tex', 'ready', 'size', 'dpr', 'c', 'f', 'R', 'k', 'T', 'up', 'east', 'north', 'glow', 'dome', 'cut', 'curve', 'sky', 'gain'].forEach(function (n) { U[n] = gl.getUniformLocation(prog, n); });
 
+  // ---- illustrations: textured meshes blended with 'screen' (black adds nothing, so no box around them) ----
+  var AVS = 'attribute vec4 pv; uniform vec2 css; varying vec2 uv; void main(){ uv = pv.zw; gl_Position = vec4(pv.x / css.x * 2.0 - 1.0, 1.0 - pv.y / css.y * 2.0, 0.0, 1.0); }';
+  var AFS = 'precision mediump float; uniform sampler2D art; uniform vec3 tint; uniform float alpha; varying vec2 uv; void main(){ vec3 g = texture2D(art, uv).rgb; gl_FragColor = vec4(g * tint * alpha, 1.0); }';
+  var aprog;
+  try {
+    aprog = gl.createProgram();
+    gl.attachShader(aprog, shader(gl.VERTEX_SHADER, AVS)); gl.attachShader(aprog, shader(gl.FRAGMENT_SHADER, AFS));
+    gl.linkProgram(aprog);
+    if (!gl.getProgramParameter(aprog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(aprog));
+  } catch (e) { console.warn('SkyGL art disabled:', e); aprog = null; }
+  var AU = aprog ? { pv: gl.getAttribLocation(aprog, 'pv'), css: gl.getUniformLocation(aprog, 'css'), art: gl.getUniformLocation(aprog, 'art'), tint: gl.getUniformLocation(aprog, 'tint'), alpha: gl.getUniformLocation(aprog, 'alpha') } : null;
+  var abuf = gl.createBuffer(), artTex = {};
+  function artTexture(key, img) {
+    if (artTex[key]) return artTex[key];
+    var t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+    var pot = (img.width & (img.width - 1)) === 0 && (img.height & (img.height - 1)) === 0;
+    if (pot) gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, pot ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return (artTex[key] = t);
+  }
+
   var ready = false;
   var tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -83,6 +109,31 @@ var SkyGL = function (canvas, url) {
 
   var W = 0, H = 0, DPR = 1;
   return {
+    hasArt: !!aprog,
+    // items: [{ key, img, tris: Float32Array of x,y,u,v (CSS px) per vertex, alpha, clip }]
+    drawArt: function (items, tint) {
+      if (!aprog || !items.length) return;
+      gl.useProgram(aprog);
+      gl.bindBuffer(gl.ARRAY_BUFFER, abuf);
+      gl.enableVertexAttribArray(AU.pv); gl.vertexAttribPointer(AU.pv, 4, gl.FLOAT, false, 0, 0);
+      gl.uniform2f(AU.css, W, H); gl.uniform1i(AU.art, 1); gl.uniform3f(AU.tint, tint[0], tint[1], tint[2]);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_COLOR); // screen
+      gl.enable(gl.SCISSOR_TEST);
+      gl.activeTexture(gl.TEXTURE1);
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i], cl = it.clip;
+        gl.scissor(Math.round(cl[0] * DPR), Math.round((H - cl[1] - cl[3]) * DPR), Math.round(cl[2] * DPR), Math.round(cl[3] * DPR));
+        gl.bindTexture(gl.TEXTURE_2D, artTexture(it.key, it.img));
+        gl.uniform1f(AU.alpha, it.alpha);
+        gl.bufferData(gl.ARRAY_BUFFER, it.tris, gl.STREAM_DRAW);
+        gl.drawArrays(gl.TRIANGLES, 0, it.tris.length / 4);
+      }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND);
+      gl.useProgram(prog);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    },
     resize: function (w, h, dpr) {
       W = w; H = h; DPR = dpr;
       canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
@@ -92,6 +143,10 @@ var SkyGL = function (canvas, url) {
     draw: function (views, T, M, sky, gain, o) {
       var up = M[2];
       gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(prog);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.uniform1i(U.tex, 0); gl.uniform1f(U.ready, ready ? 1 : 0);
       gl.uniform2f(U.size, canvas.width, canvas.height); gl.uniform1f(U.dpr, DPR);
       // GLSL mat3 is column-major: uploading T's rows as columns gives the transpose (camera -> J2000)

@@ -1,6 +1,6 @@
 // Sky renderer. Draws one flat view or two lens-corrected VR views per frame.
 // The app owns input, camera and UI state; everything it wants drawn is passed in render(opts).
-var SkyEngine = function (canvas, glCanvas, artCanvas) {
+var SkyEngine = function (canvas, glCanvas) {
   'use strict';
   var S = window.SKY, C = SkyCore, D2R = C.D2R, K = CONTENT;
   var ctx = canvas.getContext('2d');
@@ -110,14 +110,14 @@ var SkyEngine = function (canvas, glCanvas, artCanvas) {
         g.drawImage(im, 0, 0);
         // grey line work on black, tinted warm; the black disappears because the art layer blends with 'screen'
         g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgb(242,224,192)'; g.fillRect(0, 0, cv.width, cv.height);
-        A.canvas = cv; setupArt(A, im.naturalWidth / A.size[0]); A.ready = true;
+        A.canvas = cv; A.img = im; setupArt(A, im.naturalWidth / A.size[0]); A.ready = true;
       };
       im.src = A.file;
     }
     return null;
   }
   // image pixels -> sky: an affine map onto the tangent plane fixed by the three anchor stars, sampled on a grid
-  var ART_N = 6;
+  var ART_N = 10;
   function setupArt(A, scale) {
     var vs = A.anchors.map(function (a) { return C.radec2vec(a[2], a[3]); });
     var c = norm([vs[0][0] + vs[1][0] + vs[2][0], vs[0][1] + vs[1][1] + vs[2][1], vs[0][2] + vs[1][2] + vs[2][2]]);
@@ -389,6 +389,18 @@ var SkyEngine = function (canvas, glCanvas, artCanvas) {
       ok[k] = proj(view, CV[0], CV[1], CV[2], P);
       sp[k] = [P[0], P[1]];
     }
+    if (GL && GL.hasArt) { // WebGL: one seamless mesh, screen-blended into the sky layer
+      var tris = [];
+      for (var gj = 0; gj < N; gj++) for (var gi = 0; gi < N; gi++) {
+        var q00 = gj * (N + 1) + gi, q10 = q00 + 1, q01 = q00 + N + 1, q11 = q01 + 1;
+        if (!(ok[q00] && ok[q10] && ok[q01] && ok[q11])) continue;
+        var u0 = gi / N, u1 = (gi + 1) / N, v0 = gj / N, v1 = (gj + 1) / N;
+        tris.push(sp[q00][0], sp[q00][1], u0, v0, sp[q10][0], sp[q10][1], u1, v0, sp[q01][0], sp[q01][1], u0, v1,
+                  sp[q10][0], sp[q10][1], u1, v0, sp[q11][0], sp[q11][1], u1, v1, sp[q01][0], sp[q01][1], u0, v1);
+      }
+      if (tris.length) artQueue.push({ key: id, img: A.img, tris: new Float32Array(tris), alpha: a * 0.62, clip: view.clip });
+      return;
+    }
     var cw = A.W / N, ch = A.H / N, cl = view.clip;
     // draw the mesh opaque into a scratch layer (overlapping edges then look seamless), then screen it on once
     var pw = Math.ceil(cl[2] * DPR), ph = Math.ceil(cl[3] * DPR);
@@ -403,14 +415,11 @@ var SkyEngine = function (canvas, glCanvas, artCanvas) {
       if (ok[i10] && ok[i11] && ok[i01]) artTri(A, s10, s11, s01, sp[i10], sp[i11], sp[i01], i * cw, j * ch, cw, ch);
     }
     ctx = main;
-    var dst = artOut || ctx;
-    dst.save();
-    dst.setTransform(1, 0, 0, 1, 0, 0);
-    dst.beginPath(); dst.rect(Math.round(cl[0] * DPR), Math.round(cl[1] * DPR), pw, ph); dst.clip();
-    if (!artOut) dst.globalCompositeOperation = 'screen';
-    dst.globalAlpha = a * 0.62;
-    dst.drawImage(artLayer, Math.round(cl[0] * DPR), Math.round(cl[1] * DPR));
-    dst.restore();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = a * 0.62;
+    ctx.drawImage(artLayer, Math.round(cl[0] * DPR), Math.round(cl[1] * DPR));
+    ctx.restore();
   }
   var artLayer = document.createElement('canvas'), artCtx = artLayer.getContext('2d'), artOff = [0, 0];
   function artTri(A, s0, s1, s2, d0, d1, d2, sx, sy, sw, sh) {
@@ -928,15 +937,11 @@ var SkyEngine = function (canvas, glCanvas, artCanvas) {
   // NASA Milky Way photo map on a WebGL layer behind this canvas; without WebGL the point-cloud band is used
   var GL = glCanvas && window.SkyGL ? SkyGL(glCanvas, 'assets/milkyway_4k.jpg') : null;
   if (glCanvas && !GL) glCanvas.style.display = 'none';
-  // with WebGL the 2D canvas is transparent, so illustrations go on their own canvas that the browser blends
-  // with 'screen' (CSS) over the sky; without it they are screened straight onto the opaque 2D sky
-  var artOut = artCanvas && GL ? artCanvas.getContext('2d') : null;
-  if (artCanvas && !GL) artCanvas.style.display = 'none';
+  var artQueue = []; // illustrations to draw in the WebGL layer this frame
   function resize(w, h, dpr) {
     W = w; H = h; DPR = Math.min(dpr || 1, 2);
     canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
     if (GL) GL.resize(W, H, DPR);
-    if (artOut) { artCanvas.width = canvas.width; artCanvas.height = canvas.height; }
   }
   function skyRgb() {
     var t = clamp((-frame.sunAlt - 4) / 14, 0, 1);
@@ -949,7 +954,6 @@ var SkyEngine = function (canvas, glCanvas, artCanvas) {
     computeFrame(o.minutes, o.cam);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     if (GL) ctx.clearRect(0, 0, W, H); else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
-    if (artOut) { artOut.setTransform(1, 0, 0, 1, 0, 0); artOut.clearRect(0, 0, artCanvas.width, artCanvas.height); }
     var views;
     if (o.mode === 'vr') {
       var half = W / 2;
@@ -972,7 +976,9 @@ var SkyEngine = function (canvas, glCanvas, artCanvas) {
         cut: 0.2, curve: 1.25 // keep only the band itself, not the haze around it
       });
     }
+    artQueue.length = 0;
     for (var i = 0; i < views.length; i++) drawView(views[i], o);
+    if (GL && artQueue.length) GL.drawArt(artQueue, [242 / 255, 224 / 255, 192 / 255]);
     if (o.mode === 'vr') { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(W / 2 - 0.5, 0, 1, H); }
     return frame;
   }
