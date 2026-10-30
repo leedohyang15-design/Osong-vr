@@ -1,9 +1,10 @@
 // Sky renderer. Draws one flat view or two lens-corrected VR views per frame.
 // The app owns input, camera and UI state; everything it wants drawn is passed in render(opts).
-var SkyEngine = function (canvas, glCanvas) {
+var SkyEngine = function (canvas, glCanvas, artCanvas) {
   'use strict';
   var S = window.SKY, C = SkyCore, D2R = C.D2R, K = CONTENT;
   var ctx = canvas.getContext('2d');
+
 
   var SERIF = '"Nanum Myeongjo", "AppleMyungjo", "Batang", serif';
   var SANS = '"IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
@@ -107,7 +108,8 @@ var SkyEngine = function (canvas, glCanvas) {
         var cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight;
         var g = cv.getContext('2d');
         g.drawImage(im, 0, 0);
-        g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgb(255,222,172)'; g.fillRect(0, 0, cv.width, cv.height);
+        // grey line work on black, tinted warm; the black disappears because the art layer blends with 'screen'
+        g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgb(242,224,192)'; g.fillRect(0, 0, cv.width, cv.height);
         A.canvas = cv; setupArt(A, im.naturalWidth / A.size[0]); A.ready = true;
       };
       im.src = A.file;
@@ -143,21 +145,20 @@ var SkyEngine = function (canvas, glCanvas) {
   }
 
   // horizon silhouette: low tree line with a few blocks of buildings toward Osong station (north-east)
-  var TREE = new Float32Array(361);
+  // horizon silhouette, one height (degrees) every half degree of azimuth
+  var TREE = new Float32Array(721);
   (function () {
-    function hash(n) { var x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
-    for (var a = 0; a <= 360; a++) {
-      var r = a * D2R;
-      var h = 1.1 + 0.55 * Math.sin(r * 3 + 0.7) + 0.4 * Math.sin(r * 7 + 2.1) + 0.25 * Math.sin(r * 17 + 0.3);
-      h += 0.5 * Math.abs(Math.sin(r * 41 + hash(a >> 2) * 6)); // tree crowns
-      var blk = Math.floor(a / 4);
-      if ((a > 28 && a < 70) || (a > 150 && a < 172)) {
-        var b = hash(blk + 17);
-        if (b > 0.45) h = Math.max(h, 1.6 + b * 2.6);
-      }
-      TREE[a] = Math.max(0.4, h);
+    function noise(x) { // smooth 1D value noise
+      var i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+      function h(n) { var y = Math.sin(n * 127.1 + 311.7) * 43758.5453; return y - Math.floor(y); }
+      return h(i) * (1 - u) + h(i + 1) * u;
     }
-    TREE[360] = TREE[0];
+    for (var k = 0; k <= 720; k++) {
+      var az = k / 2;
+      // park trees: rounded crowns of different sizes
+      TREE[k] = 0.9 + 0.7 * noise(az / 24) + 0.45 * noise(az / 7 + 11) + 0.35 * Math.sqrt(noise(az / 1.3 + 5)) + 0.12 * noise(az * 1.7);
+    }
+    TREE[720] = TREE[0];
   })();
 
   // ---------- helpers ----------
@@ -273,7 +274,7 @@ var SkyEngine = function (canvas, glCanvas) {
   function bandPath(view, a0, a1, z0, z1, step, heights) {
     for (var az = z0; az < z1; az += step) {
       var b = Math.min(z1, az + step);
-      var h0 = heights ? heights[Math.round(az) % 360] : a1, h1 = heights ? heights[Math.round(b) % 360] : a1;
+      var h0 = heights ? heights[Math.round(az * 2) % 720] : a1, h1 = heights ? heights[Math.round(b * 2) % 720] : a1;
       polyCam(view, [
         enuToCam(enuFromAltAz(a0, az), [0, 0, 0]), enuToCam(enuFromAltAz(a0, b), [0, 0, 0]),
         enuToCam(enuFromAltAz(h1, b), [0, 0, 0]), enuToCam(enuFromAltAz(h0, az), [0, 0, 0])
@@ -314,6 +315,7 @@ var SkyEngine = function (canvas, glCanvas) {
       ctx.fillRect(view.clip[0], view.clip[1], view.clip[2], view.clip[3]);
     }
     // brighter, slightly warm air toward the horizon (thicker atmosphere + town lights)
+    if (GL) { twilight(view); return; }
     var bands = [[0, 3, 0.34], [3, 7, 0.24], [7, 12, 0.15], [12, 20, 0.09], [20, 32, 0.045]];
     var glow = 'rgba(' + Math.round(70 - 30 * t) + ',' + Math.round(72 - 34 * t) + ',' + Math.round(96 - 52 * t) + ',';
     for (var bi = 0; bi < bands.length; bi++) {
@@ -326,7 +328,9 @@ var SkyEngine = function (canvas, glCanvas) {
       ctx.beginPath(); bandPath(view, dome[di][0], dome[di][1], 30, 120, 6);
       ctx.fillStyle = 'rgba(120,92,70,' + dome[di][2] * (0.4 + 0.6 * t) + ')'; ctx.fill();
     }
-    // twilight toward the set sun
+    twilight(view);
+  }
+  function twilight(view) {
     var glowA = frame.sunAlt > -4 ? 0.75 : frame.sunAlt < -18 ? 0 : 0.75 * (frame.sunAlt + 18) / 14;
     if (glowA > 0.01) {
       enuToCam(frame.sunEnu, CV);
@@ -399,11 +403,14 @@ var SkyEngine = function (canvas, glCanvas) {
       if (ok[i10] && ok[i11] && ok[i01]) artTri(A, s10, s11, s01, sp[i10], sp[i11], sp[i01], i * cw, j * ch, cw, ch);
     }
     ctx = main;
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = a * 0.55;
-    ctx.drawImage(artLayer, Math.round(cl[0] * DPR), Math.round(cl[1] * DPR));
-    ctx.restore();
+    var dst = artOut || ctx;
+    dst.save();
+    dst.setTransform(1, 0, 0, 1, 0, 0);
+    dst.beginPath(); dst.rect(Math.round(cl[0] * DPR), Math.round(cl[1] * DPR), pw, ph); dst.clip();
+    if (!artOut) dst.globalCompositeOperation = 'screen';
+    dst.globalAlpha = a * 0.62;
+    dst.drawImage(artLayer, Math.round(cl[0] * DPR), Math.round(cl[1] * DPR));
+    dst.restore();
   }
   var artLayer = document.createElement('canvas'), artCtx = artLayer.getContext('2d'), artOff = [0, 0];
   function artTri(A, s0, s1, s2, d0, d1, d2, sx, sy, sw, sh) {
@@ -455,27 +462,22 @@ var SkyEngine = function (canvas, glCanvas) {
     ctx.globalAlpha = 1;
   }
 
+  // planets look like steady stars to the eye: a point of light, no outline shapes
+  var BODY_SPRITE = { Saturn: 3, Jupiter: 2, Mars: 5, Venus: 2, Mercury: 3, Moon: 2, Uranus: 0, Neptune: 0 };
   function drawBody(view, b) {
     toCam(b.v, CV);
     if (!proj(view, CV[0], CV[1], CV[2], P)) return;
-    var sizeK = Math.sqrt(view.f / 500);
-    if (b.key === 'Saturn') {
-      var r = 3.6 * sizeK;
-      ctx.drawImage(sprites[3], P[0] - r * 2.6, P[1] - r * 2.6, r * 5.2, r * 5.2);
-      ctx.strokeStyle = 'rgba(240,216,168,0.85)'; ctx.lineWidth = Math.max(0.8, r * 0.28);
-      ctx.beginPath(); ctx.ellipse(P[0], P[1], r * 2.2, r * 0.32, -0.42, 0, Math.PI * 2); ctx.stroke();
-    } else if (b.mag > 5) {
-      ctx.fillStyle = 'rgba(160,214,206,0.8)';
-      ctx.beginPath(); ctx.arc(P[0], P[1], 1.4 * sizeK, 0, Math.PI * 2); ctx.fill();
-    } else {
-      var d = 14 * sizeK;
-      ctx.drawImage(sprites[3], P[0] - d / 2, P[1] - d / 2, d, d);
-    }
+    var sizeK = clamp(Math.sqrt(view.f / 400), 0.8, 2);
+    var faint = b.mag > 5;
+    var d = faint ? 4.2 * sizeK : (3.0 + 2.1 * Math.max(0, 5.4 - b.mag)) * sizeK;
+    ctx.globalAlpha = faint ? 0.6 : 1;
+    ctx.drawImage(sprites[BODY_SPRITE[b.key] || 2], P[0] - d / 2, P[1] - d / 2, d, d);
+    ctx.globalAlpha = 1;
   }
 
   function ground(view) {
     // tree line and buildings first, so they cut stars right at the horizon
-    ctx.beginPath(); bandPath(view, -0.5, 0, 0, 360, 2, TREE);
+    ctx.beginPath(); bandPath(view, -0.5, 0, 0, 360, 0.5, TREE);
     ctx.fillStyle = '#05070b'; ctx.fill();
     // the ground itself: every screen point whose ray points below the horizon
     var fU = cam.f[2], rU = cam.r[2], uU = cam.u[2], L = view.f * 8;
@@ -926,10 +928,15 @@ var SkyEngine = function (canvas, glCanvas) {
   // NASA Milky Way photo map on a WebGL layer behind this canvas; without WebGL the point-cloud band is used
   var GL = glCanvas && window.SkyGL ? SkyGL(glCanvas, 'assets/milkyway_4k.jpg') : null;
   if (glCanvas && !GL) glCanvas.style.display = 'none';
+  // with WebGL the 2D canvas is transparent, so illustrations go on their own canvas that the browser blends
+  // with 'screen' (CSS) over the sky; without it they are screened straight onto the opaque 2D sky
+  var artOut = artCanvas && GL ? artCanvas.getContext('2d') : null;
+  if (artCanvas && !GL) artCanvas.style.display = 'none';
   function resize(w, h, dpr) {
     W = w; H = h; DPR = Math.min(dpr || 1, 2);
     canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
     if (GL) GL.resize(W, H, DPR);
+    if (artOut) { artCanvas.width = canvas.width; artCanvas.height = canvas.height; }
   }
   function skyRgb() {
     var t = clamp((-frame.sunAlt - 4) / 14, 0, 1);
@@ -942,6 +949,7 @@ var SkyEngine = function (canvas, glCanvas) {
     computeFrame(o.minutes, o.cam);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     if (GL) ctx.clearRect(0, 0, W, H); else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
+    if (artOut) { artOut.setTransform(1, 0, 0, 1, 0, 0); artOut.clearRect(0, 0, artCanvas.width, artCanvas.height); }
     var views;
     if (o.mode === 'vr') {
       var half = W / 2;
@@ -957,7 +965,12 @@ var SkyEngine = function (canvas, glCanvas) {
     }
     if (GL) {
       var lim = o.lim, gain = o.show.mw ? frame.dark * frame.dark * clamp((lim - 3.0) / 3.1, 0.1, 1) * 0.95 : 0;
-      GL.draw(views, frame.T, frame.M[2], skyRgb(), gain);
+      var t = clamp((-frame.sunAlt - 4) / 14, 0, 1);
+      GL.draw(views, frame.T, frame.M, skyRgb(), gain * 0.7, {
+        glow: [(34 - 14 * t) / 255, (36 - 16 * t) / 255, (50 - 26 * t) / 255],
+        dome: [(52 * (0.4 + 0.6 * t)) / 255, (38 * (0.4 + 0.6 * t)) / 255, (26 * (0.4 + 0.6 * t)) / 255],
+        cut: 0.2, curve: 1.25 // keep only the band itself, not the haze around it
+      });
     }
     for (var i = 0; i < views.length; i++) drawView(views[i], o);
     if (o.mode === 'vr') { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(W / 2 - 0.5, 0, 1, H); }

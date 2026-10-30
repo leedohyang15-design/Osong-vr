@@ -5,7 +5,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var QS = new URLSearchParams(location.search);
   var canvas = $('sky'), stage = canvas.parentNode;
-  var eng = SkyEngine(canvas, $('skygl'));
+  var eng = SkyEngine(canvas, $('skygl'), $('skyart'));
 
   function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
   function clockText(min) {
