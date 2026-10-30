@@ -23,15 +23,15 @@ var SkyEngine = function (canvas, glCanvas) {
   // colour temperature, kept close to white: real stars only show a hint of colour to the eye
   var STAR_RGB = [[196, 212, 255], [222, 230, 255], [255, 250, 240], [255, 242, 214], [255, 224, 182], [255, 204, 160]];
   var sprites = STAR_RGB.map(function (c) {
-    var cv = document.createElement('canvas'); cv.width = cv.height = 64;
-    var g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    var cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    var g = cv.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
     var rgb = c.join(',');
     gr.addColorStop(0, 'rgba(255,255,255,1)');
-    gr.addColorStop(0.07, 'rgba(' + rgb + ',1)');
-    gr.addColorStop(0.16, 'rgba(' + rgb + ',0.55)');
-    gr.addColorStop(0.34, 'rgba(' + rgb + ',0.12)');
+    gr.addColorStop(0.1, 'rgba(' + rgb + ',1)');
+    gr.addColorStop(0.2, 'rgba(' + rgb + ',0.6)');
+    gr.addColorStop(0.38, 'rgba(' + rgb + ',0.12)');
     gr.addColorStop(1, 'rgba(' + rgb + ',0)');
-    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
     return cv;
   });
   var namedIdx = {};
@@ -403,7 +403,7 @@ var SkyEngine = function (canvas, glCanvas) {
         tris.push(sp[q00][0], sp[q00][1], u0, v0, sp[q10][0], sp[q10][1], u1, v0, sp[q01][0], sp[q01][1], u0, v1,
                   sp[q10][0], sp[q10][1], u1, v0, sp[q11][0], sp[q11][1], u1, v1, sp[q01][0], sp[q01][1], u0, v1);
       }
-      if (tris.length) artQueue.push({ key: id, img: A.canvas, tris: new Float32Array(tris), alpha: a * 0.62, clip: view.clip });
+      if (tris.length) artQueue.push({ key: id, img: A.canvas, tris: new Float32Array(tris), alpha: a * (view.vr ? 1.4 : 0.62), clip: view.clip });
       return;
     }
     var cw = A.W / N, ch = A.H / N, cl = view.clip;
@@ -422,7 +422,7 @@ var SkyEngine = function (canvas, glCanvas) {
     ctx = main;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = a * 0.62;
+    ctx.globalAlpha = Math.min(1, a * (view.vr ? 1.4 : 0.62));
     ctx.drawImage(artLayer, Math.round(cl[0] * DPR), Math.round(cl[1] * DPR));
     ctx.restore();
   }
@@ -444,7 +444,7 @@ var SkyEngine = function (canvas, glCanvas) {
 
   function stars(view, limit) {
     var M = frame.M, T = frame.T, cl = view.clip;
-    var sizeK = clamp(Math.sqrt(view.f / 400), 0.8, 2);
+    var sizeK = clamp(Math.sqrt(view.f / 400), 0.8, 2) * (view.vr ? 1.25 : 1);
     var tw = now / 1000;
     for (var i = 0; i < NS; i++) {
       var m = SM[i];
@@ -481,7 +481,7 @@ var SkyEngine = function (canvas, glCanvas) {
   function drawBody(view, b) {
     toCam(b.v, CV);
     if (!proj(view, CV[0], CV[1], CV[2], P)) return;
-    var sizeK = clamp(Math.sqrt(view.f / 400), 0.8, 2);
+    var sizeK = clamp(Math.sqrt(view.f / 400), 0.8, 2) * (view.vr ? 1.25 : 1);
     var faint = b.mag > 5;
     var d = faint ? 4.2 * sizeK : (3.0 + 2.1 * Math.max(0, 5.4 - b.mag)) * sizeK;
     ctx.globalAlpha = faint ? 0.6 : 1;
@@ -664,7 +664,9 @@ var SkyEngine = function (canvas, glCanvas) {
     }
     ctx.restore();
   }
-  // telescope eyepiece: the sky darkens outside a circle and the planet is drawn as it looks through a small telescope
+  // telescope eyepiece: the sky darkens outside a circle and Saturn is shown in a Hubble photo from 2009,
+  // when the rings were nearly edge-on as they are in 2026 (NASA, ESA and the Hubble Heritage Team (STScI/AURA))
+  var SATURN = new Image(); SATURN.src = 'assets/saturn.webp';
   function eyepiece(view, ep, fontPx) {
     var a = clamp(ep.a, 0, 1), cl = view.clip;
     var r = view.vr ? view.R * 0.42 : Math.min(cl[2], cl[3]) * 0.34;
@@ -673,27 +675,18 @@ var SkyEngine = function (canvas, glCanvas) {
     ctx.fillStyle = 'rgba(0,0,0,' + 0.88 * a + ')'; ctx.fill();
     ctx.beginPath(); ctx.arc(view.cx, view.cy, r, 0, Math.PI * 2); ctx.clip();
     ctx.fillStyle = 'rgba(2,3,6,' + 0.9 * a + ')'; ctx.fillRect(view.cx - r, view.cy - r, r * 2, r * 2);
-    ctx.globalAlpha = a;
-    var rp = r * 0.2, tilt = -0.38, ra = rp * 2.25, rb = rp * 0.1;
-    ctx.translate(view.cx, view.cy); ctx.rotate(tilt);
-    function ring(back) {
-      ctx.beginPath(); ctx.ellipse(0, 0, ra, rb, 0, back ? Math.PI : 0, back ? Math.PI * 2 : Math.PI);
-      ctx.strokeStyle = 'rgba(226,206,160,0.9)'; ctx.lineWidth = Math.max(1.5, rp * 0.13); ctx.stroke();
-      ctx.beginPath(); ctx.ellipse(0, 0, ra * 0.82, rb * 0.82, 0, back ? Math.PI : 0, back ? Math.PI * 2 : Math.PI);
-      ctx.strokeStyle = 'rgba(196,176,134,0.6)'; ctx.lineWidth = Math.max(1, rp * 0.07); ctx.stroke();
+    if (SATURN.complete && SATURN.naturalWidth) {
+      var sw = r * 1.5, sh = sw * SATURN.naturalHeight / SATURN.naturalWidth;
+      ctx.globalAlpha = a;
+      ctx.translate(view.cx, view.cy); ctx.rotate(-0.12);
+      ctx.drawImage(SATURN, -sw / 2, -sh / 2, sw, sh);
     }
-    ring(true);
-    var g = ctx.createLinearGradient(0, -rp, 0, rp);
-    g.addColorStop(0, '#d9c28e'); g.addColorStop(0.35, '#ead8a8'); g.addColorStop(0.5, '#cdb47c'); g.addColorStop(0.62, '#e6d2a0'); g.addColorStop(1, '#a88f5c');
-    ctx.beginPath(); ctx.ellipse(0, 0, rp, rp * 0.9, 0, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(0, rb * 1.6, rp, rb * 1.4, 0, 0, Math.PI * 2); ctx.fill(); // ring shadow
-    ring(false);
     ctx.restore();
     ctx.save(); ctx.globalAlpha = a;
     ctx.strokeStyle = 'rgba(200,190,170,0.35)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(view.cx, view.cy, r, 0, Math.PI * 2); ctx.stroke();
     ctx.font = Math.round(fontPx * 0.78) + 'px ' + MONO; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(214,206,190,0.75)'; ctx.fillText('망원경 시야 · 약 100배', view.cx, view.cy + r + fontPx * 1.1);
+    ctx.fillStyle = 'rgba(214,206,190,0.75)'; ctx.fillText('허블 사진 · 2009년, 올해처럼 고리가 옆으로 누운 때', view.cx, view.vr ? view.cy - r - fontPx * 0.9 : view.cy + r + fontPx * 1.1);
     ctx.restore();
   }
 
@@ -877,7 +870,7 @@ var SkyEngine = function (canvas, glCanvas) {
     if (o.eyepiece && o.eyepiece.a > 0) eyepiece(view, o.eyepiece, fontPx);
     if (view.vr && o.panel && o.panel.open) drawPanel(view, o.panel, fontPx);
     // reticle
-    if (o.reticle !== false) {
+    if (o.reticle !== false && !(o.eyepiece && o.eyepiece.a > 0.3)) {
       ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(view.cx, view.cy, fontPx * 0.62, 0, Math.PI * 2); ctx.stroke();
       if (o.dwell > 0) {
@@ -944,9 +937,9 @@ var SkyEngine = function (canvas, glCanvas) {
   if (glCanvas && !GL) glCanvas.style.display = 'none';
   var artQueue = []; // illustrations to draw in the WebGL layer this frame
   function resize(w, h, dpr) {
-    W = w; H = h; DPR = Math.min(dpr || 1, 2);
+    W = w; H = h; DPR = Math.min(dpr || 1, 3); // full phone resolution keeps stars crisp
     canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
-    if (GL) GL.resize(W, H, DPR);
+    if (GL) GL.resize(W, H, Math.min(DPR, 2)); // the smooth sky background does not need more
   }
   function skyRgb() {
     var t = clamp((-frame.sunAlt - 4) / 14, 0, 1);

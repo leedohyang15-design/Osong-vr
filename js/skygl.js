@@ -66,7 +66,7 @@ var SkyGL = function (canvas, url) {
 
   // ---- illustrations: textured meshes; the art's alpha is its brightness, so nothing but the drawing shows ----
   var AVS = 'attribute vec4 pv; uniform vec2 css; varying vec2 uv; void main(){ uv = pv.zw; gl_Position = vec4(pv.x / css.x * 2.0 - 1.0, 1.0 - pv.y / css.y * 2.0, 0.0, 1.0); }';
-  var AFS = 'precision mediump float; uniform sampler2D art; uniform float alpha; varying vec2 uv; void main(){ gl_FragColor = texture2D(art, uv) * alpha; }';
+  var AFS = 'precision mediump float; uniform sampler2D art; uniform float alpha; varying vec2 uv; void main(){ gl_FragColor = min(texture2D(art, uv) * alpha, vec4(1.0)); }';
   var aprog;
   try {
     aprog = gl.createProgram();
