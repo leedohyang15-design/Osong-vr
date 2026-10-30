@@ -465,13 +465,6 @@ var SkyEngine = function (canvas, glCanvas) {
       var col = up < 0.12 ? Math.min(5, SB[i] + 1) : SB[i];
       ctx.globalAlpha = alpha;
       ctx.drawImage(sprites[col], P[0] - d / 2, P[1] - d / 2, d, d);
-      if (m < 0.9 && vis > 2) { // faint diffraction cross on the brightest few
-        var s = d * 0.95;
-        ctx.globalAlpha = alpha * 0.22;
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(P[0] - s, P[1] - 0.4, s * 2, 0.8);
-        ctx.fillRect(P[0] - 0.4, P[1] - s, 0.8, s * 2);
-      }
     }
     ctx.globalAlpha = 1;
   }
