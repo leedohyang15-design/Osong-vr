@@ -1,6 +1,6 @@
 // Sky renderer. Draws one flat view or two lens-corrected VR views per frame.
 // The app owns input, camera and UI state; everything it wants drawn is passed in render(opts).
-var SkyEngine = function (canvas) {
+var SkyEngine = function (canvas, glCanvas) {
   'use strict';
   var S = window.SKY, C = SkyCore, D2R = C.D2R, K = CONTENT;
   var ctx = canvas.getContext('2d');
@@ -309,8 +309,10 @@ var SkyEngine = function (canvas) {
   function skyBase(view) {
     var t = clamp((-frame.sunAlt - 4) / 14, 0, 1);
     var top = [Math.round(30 - 25 * t), Math.round(44 - 37 * t), Math.round(78 - 64 * t)];
-    ctx.fillStyle = 'rgb(' + top.join(',') + ')';
-    ctx.fillRect(view.clip[0], view.clip[1], view.clip[2], view.clip[3]);
+    if (!GL) { // with WebGL the base colour comes from the background layer
+      ctx.fillStyle = 'rgb(' + top.join(',') + ')';
+      ctx.fillRect(view.clip[0], view.clip[1], view.clip[2], view.clip[3]);
+    }
     // brighter, slightly warm air toward the horizon (thicker atmosphere + town lights)
     var bands = [[0, 3, 0.34], [3, 7, 0.24], [7, 12, 0.15], [12, 20, 0.09], [20, 32, 0.045]];
     var glow = 'rgba(' + Math.round(70 - 30 * t) + ',' + Math.round(72 - 34 * t) + ',' + Math.round(96 - 52 * t) + ',';
@@ -823,7 +825,7 @@ var SkyEngine = function (canvas) {
     ctx.save();
     ctx.beginPath(); ctx.rect(view.clip[0], view.clip[1], view.clip[2], view.clip[3]); ctx.clip();
     skyBase(view);
-    if (o.show.mw) milkyWay(view, o.lim);
+    if (o.show.mw && !GL) milkyWay(view, o.lim);
     var hl = o.highlight, la = o.labelAlpha == null ? 1 : o.labelAlpha;
     var gap = 0.7 * D2R, lit = {};
     (o.lineCons || []).forEach(function (l) { lit[l.id] = l.p; });
@@ -921,9 +923,17 @@ var SkyEngine = function (canvas) {
 
   // ---------- frame entry ----------
   var W = 0, H = 0, DPR = 1;
+  // NASA Milky Way photo map on a WebGL layer behind this canvas; without WebGL the point-cloud band is used
+  var GL = glCanvas && window.SkyGL ? SkyGL(glCanvas, 'assets/milkyway_4k.jpg') : null;
+  if (glCanvas && !GL) glCanvas.style.display = 'none';
   function resize(w, h, dpr) {
     W = w; H = h; DPR = Math.min(dpr || 1, 2);
     canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+    if (GL) GL.resize(W, H, DPR);
+  }
+  function skyRgb() {
+    var t = clamp((-frame.sunAlt - 4) / 14, 0, 1);
+    return [(30 - 25 * t) / 255, (44 - 37 * t) / 255, (78 - 64 * t) / 255];
   }
   // o: { cam, minutes, lim, show, mode: 'vr'|'flat', fov, cyFrac, warp, vrFov, sep, highlight, figures, sel, card, top,
   //      caption, guide, panel, hint, dwell, reticle }
@@ -931,20 +941,26 @@ var SkyEngine = function (canvas) {
     opts = o; now = performance.now();
     computeFrame(o.minutes, o.cam);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    if (GL) ctx.clearRect(0, 0, W, H); else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
+    var views;
     if (o.mode === 'vr') {
       var half = W / 2;
       var sep = Math.min(half * 1.02, o.sep);
       var R = Math.min(half / 2 + 8, H / 2);
       var f = (half / 2) / Math.tan(o.vrFov / 2 * D2R);
       var font = clamp(half / 26, 11, 18);
-      drawView({ cx: W / 2 - sep / 2, cy: H / 2, f: f, R: R, k: o.warp, clip: [0, 0, half, H], vr: true, font: font }, o);
-      drawView({ cx: W / 2 + sep / 2, cy: H / 2, f: f, R: R, k: o.warp, clip: [half, 0, half, H], vr: true, font: font }, o);
-      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(half - 0.5, 0, 1, H);
+      views = [{ cx: W / 2 - sep / 2, cy: H / 2, f: f, R: R, k: o.warp, clip: [0, 0, half, H], vr: true, font: font },
+               { cx: W / 2 + sep / 2, cy: H / 2, f: f, R: R, k: o.warp, clip: [half, 0, half, H], vr: true, font: font }];
     } else {
       var ff = (Math.max(W, H) / 2) / Math.tan(o.fov / 2 * D2R);
-      drawView({ cx: W / 2, cy: H * (o.cyFrac == null ? 0.5 : o.cyFrac), f: ff, R: 1, k: 0, clip: [0, 0, W, H], vr: false, font: clamp(W / 44, 12, 16) }, o);
+      views = [{ cx: W / 2, cy: H * (o.cyFrac == null ? 0.5 : o.cyFrac), f: ff, R: 1, k: 0, clip: [0, 0, W, H], vr: false, font: clamp(W / 44, 12, 16) }];
     }
+    if (GL) {
+      var lim = o.lim, gain = o.show.mw ? frame.dark * frame.dark * clamp((lim - 3.0) / 3.1, 0.1, 1) * 0.95 : 0;
+      GL.draw(views, frame.T, frame.M[2], skyRgb(), gain);
+    }
+    for (var i = 0; i < views.length; i++) drawView(views[i], o);
+    if (o.mode === 'vr') { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(W / 2 - 0.5, 0, 1, H); }
     return frame;
   }
 

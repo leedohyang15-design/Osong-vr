@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+<canvas id="skygl" class="sky" aria-hidden="true"></canvas>
 <canvas id="sky" class="sky" aria-label="2026년 11월 1일 저녁 오송호수공원 밤하늘"></canvas>
 
 <main id="menu">
@@ -111,7 +112,7 @@
       <p class="fine">어지러우면 바로 벗고 쉬어요. 어린이는 한 번에 3분 정도가 좋아요.</p>
     </section>
 
-    <p class="foot">별 5,044개 · 88개 별자리 · 행성 위치는 2026-11-01 18:00–21:30 KST 기준으로 계산했어요.<br>달은 밤 11시 18분에 떠서 관측 시간에는 보이지 않아요.<br>별자리 그림: Johan Meuris / Stellarium, <a href="https://artlibre.org/licence/lal/en/" style="color:inherit">Free Art License</a>. 별 목록: d3-celestial(BSD).</p>
+    <p class="foot">별 5,044개 · 88개 별자리 · 행성 위치는 2026-11-01 18:00–21:30 KST 기준으로 계산했어요.<br>달은 밤 11시 18분에 떠서 관측 시간에는 보이지 않아요.<br>별자리 그림: Johan Meuris / Stellarium, <a href="https://artlibre.org/licence/lal/en/" style="color:inherit">Free Art License</a>. 은하수: NASA/GSFC Scientific Visualization Studio, Deep Star Maps 2020. 별 목록: d3-celestial(BSD).</p>
   </div>
 </main>
 
@@ -166,6 +167,7 @@
 <script src="js/sky-core.js"></script>
 <script src="js/content.js"></script>
 <script src="js/figures-data.js"></script>
+<script src="js/skygl.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/shows.js"></script>
 <script src="js/sync.js"></script>

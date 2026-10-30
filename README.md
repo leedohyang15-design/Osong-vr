@@ -53,6 +53,7 @@ js/sky-data.js          별 5,044개, 별자리 선, 은하수, 행성 위치 (2
 js/engine.js            하늘 그리기 (VR 양안 + 렌즈 보정, 은하수, 지평선, 라벨, 별자리 그림, 쇼 연출)
 js/figures-data.js      별자리 그림 85개의 기준 별 좌표 (tools/build-figures.js로 생성)
 assets/figures/         별자리 그림 (Johan Meuris / Stellarium, Free Art License)
+assets/milkyway_4k.jpg  은하수 사진 지도 (NASA SVS Deep Star Maps 2020), js/skygl.js가 WebGL로 그림
 js/content.js           별자리·별·행성 설명
 js/shows.js             쇼 대본과 장면 계산
 js/sync.js, server/     동기화 (서버 시계 기준, 자동 재연결)
@@ -62,5 +63,6 @@ vendor/qrcode.js        qrcode-generator 1.4.4 (MIT)
 
 ## 출처
 - 별자리 그림: Johan Meuris, Stellarium western sky culture — Free Art License
+- 은하수 사진 지도: NASA/Goddard Space Flight Center Scientific Visualization Studio, Deep Star Maps 2020 (Gaia DR2: ESA/Gaia/DPAC) — `tools/build-milkyway.py`로 변환, WebGL이 없으면 윤곽 데이터로 대신 그려요
 - 별·별자리 선·은하수 윤곽: d3-celestial (Olaf Frohn, BSD-3-Clause)
 - 행성 위치: astronomy-engine으로 계산

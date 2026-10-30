@@ -4,7 +4,7 @@
   var C = SkyCore, D2R = C.D2R;
   var $ = function (id) { return document.getElementById(id); };
   var canvas = $('sky');
-  var eng = SkyEngine(canvas);
+  var eng = SkyEngine(canvas, $('skygl'));
   var QS = new URLSearchParams(location.search);
   var DIRS = CONTENT.DIRS;
 
