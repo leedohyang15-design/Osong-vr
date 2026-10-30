@@ -64,9 +64,9 @@ var SkyGL = function (canvas, url) {
   var U = {};
   ['tex', 'ready', 'size', 'dpr', 'c', 'f', 'R', 'k', 'T', 'up', 'east', 'north', 'glow', 'dome', 'cut', 'curve', 'sky', 'gain'].forEach(function (n) { U[n] = gl.getUniformLocation(prog, n); });
 
-  // ---- illustrations: textured meshes blended with 'screen' (black adds nothing, so no box around them) ----
+  // ---- illustrations: textured meshes; the art's alpha is its brightness, so nothing but the drawing shows ----
   var AVS = 'attribute vec4 pv; uniform vec2 css; varying vec2 uv; void main(){ uv = pv.zw; gl_Position = vec4(pv.x / css.x * 2.0 - 1.0, 1.0 - pv.y / css.y * 2.0, 0.0, 1.0); }';
-  var AFS = 'precision mediump float; uniform sampler2D art; uniform vec3 tint; uniform float alpha; varying vec2 uv; void main(){ vec3 g = texture2D(art, uv).rgb; gl_FragColor = vec4(g * tint * alpha, 1.0); }';
+  var AFS = 'precision mediump float; uniform sampler2D art; uniform float alpha; varying vec2 uv; void main(){ gl_FragColor = texture2D(art, uv) * alpha; }';
   var aprog;
   try {
     aprog = gl.createProgram();
@@ -74,13 +74,15 @@ var SkyGL = function (canvas, url) {
     gl.linkProgram(aprog);
     if (!gl.getProgramParameter(aprog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(aprog));
   } catch (e) { console.warn('SkyGL art disabled:', e); aprog = null; }
-  var AU = aprog ? { pv: gl.getAttribLocation(aprog, 'pv'), css: gl.getUniformLocation(aprog, 'css'), art: gl.getUniformLocation(aprog, 'art'), tint: gl.getUniformLocation(aprog, 'tint'), alpha: gl.getUniformLocation(aprog, 'alpha') } : null;
+  var AU = aprog ? { pv: gl.getAttribLocation(aprog, 'pv'), css: gl.getUniformLocation(aprog, 'css'), art: gl.getUniformLocation(aprog, 'art'), alpha: gl.getUniformLocation(aprog, 'alpha') } : null;
   var abuf = gl.createBuffer(), artTex = {};
   function artTexture(key, img) {
     if (artTex[key]) return artTex[key];
     var t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     var pot = (img.width & (img.width - 1)) === 0 && (img.height & (img.height - 1)) === 0;
     if (pot) gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, pot ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
@@ -97,7 +99,9 @@ var SkyGL = function (canvas, url) {
   var img = new Image();
   img.onload = function () {
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     // no mipmaps: they would draw a seam where RA wraps from 360 to 0
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -111,13 +115,13 @@ var SkyGL = function (canvas, url) {
   return {
     hasArt: !!aprog,
     // items: [{ key, img, tris: Float32Array of x,y,u,v (CSS px) per vertex, alpha, clip }]
-    drawArt: function (items, tint) {
+    drawArt: function (items) {
       if (!aprog || !items.length) return;
       gl.useProgram(aprog);
       gl.bindBuffer(gl.ARRAY_BUFFER, abuf);
       gl.enableVertexAttribArray(AU.pv); gl.vertexAttribPointer(AU.pv, 4, gl.FLOAT, false, 0, 0);
-      gl.uniform2f(AU.css, W, H); gl.uniform1i(AU.art, 1); gl.uniform3f(AU.tint, tint[0], tint[1], tint[2]);
-      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_COLOR); // screen
+      gl.uniform2f(AU.css, W, H); gl.uniform1i(AU.art, 1);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); // premultiplied over
       gl.enable(gl.SCISSOR_TEST);
       gl.activeTexture(gl.TEXTURE1);
       for (var i = 0; i < items.length; i++) {

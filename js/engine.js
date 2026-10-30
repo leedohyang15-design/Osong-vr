@@ -108,9 +108,14 @@ var SkyEngine = function (canvas, glCanvas) {
         var cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight;
         var g = cv.getContext('2d');
         g.drawImage(im, 0, 0);
-        // grey line work on black, tinted warm; the black disappears because the art layer blends with 'screen'
-        g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgb(242,224,192)'; g.fillRect(0, 0, cv.width, cv.height);
-        A.canvas = cv; A.img = im; setupArt(A, im.naturalWidth / A.size[0]); A.ready = true;
+        // grey line work on black -> warm ivory with brightness as opacity, so the black background is truly transparent
+        var d = g.getImageData(0, 0, cv.width, cv.height), px = d.data;
+        for (var q = 0; q < px.length; q += 4) {
+          var l = Math.max(px[q], px[q + 1], px[q + 2]) * px[q + 3] / 255;
+          px[q] = 242; px[q + 1] = 224; px[q + 2] = 192; px[q + 3] = l;
+        }
+        g.putImageData(d, 0, 0);
+        A.canvas = cv; setupArt(A, im.naturalWidth / A.size[0]); A.ready = true;
       };
       im.src = A.file;
     }
@@ -389,7 +394,7 @@ var SkyEngine = function (canvas, glCanvas) {
       ok[k] = proj(view, CV[0], CV[1], CV[2], P);
       sp[k] = [P[0], P[1]];
     }
-    if (GL && GL.hasArt) { // WebGL: one seamless mesh, screen-blended into the sky layer
+    if (GL && GL.hasArt) { // WebGL: one seamless mesh in the sky layer
       var tris = [];
       for (var gj = 0; gj < N; gj++) for (var gi = 0; gi < N; gi++) {
         var q00 = gj * (N + 1) + gi, q10 = q00 + 1, q01 = q00 + N + 1, q11 = q01 + 1;
@@ -398,11 +403,11 @@ var SkyEngine = function (canvas, glCanvas) {
         tris.push(sp[q00][0], sp[q00][1], u0, v0, sp[q10][0], sp[q10][1], u1, v0, sp[q01][0], sp[q01][1], u0, v1,
                   sp[q10][0], sp[q10][1], u1, v0, sp[q11][0], sp[q11][1], u1, v1, sp[q01][0], sp[q01][1], u0, v1);
       }
-      if (tris.length) artQueue.push({ key: id, img: A.img, tris: new Float32Array(tris), alpha: a * 0.62, clip: view.clip });
+      if (tris.length) artQueue.push({ key: id, img: A.canvas, tris: new Float32Array(tris), alpha: a * 0.62, clip: view.clip });
       return;
     }
     var cw = A.W / N, ch = A.H / N, cl = view.clip;
-    // draw the mesh opaque into a scratch layer (overlapping edges then look seamless), then screen it on once
+    // draw the mesh opaque into a scratch layer (overlapping edges then look seamless), then lay it on once
     var pw = Math.ceil(cl[2] * DPR), ph = Math.ceil(cl[3] * DPR);
     if (artLayer.width !== pw || artLayer.height !== ph) { artLayer.width = pw; artLayer.height = ph; }
     var main = ctx; ctx = artCtx;
@@ -417,7 +422,7 @@ var SkyEngine = function (canvas, glCanvas) {
     ctx = main;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = a * 0.62;
+    ctx.globalAlpha = a * 0.62;
     ctx.drawImage(artLayer, Math.round(cl[0] * DPR), Math.round(cl[1] * DPR));
     ctx.restore();
   }
@@ -978,7 +983,7 @@ var SkyEngine = function (canvas, glCanvas) {
     }
     artQueue.length = 0;
     for (var i = 0; i < views.length; i++) drawView(views[i], o);
-    if (GL && artQueue.length) GL.drawArt(artQueue, [242 / 255, 224 / 255, 192 / 255]);
+    if (GL && artQueue.length) GL.drawArt(artQueue);
     if (o.mode === 'vr') { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(W / 2 - 0.5, 0, 1, H); }
     return frame;
   }
