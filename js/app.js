@@ -5,11 +5,11 @@
   // computed with astronomy-engine (SkyCore.setSky). Stories always play on the event night they were written for.
   var EVENT0 = { rot: S.rot, gast0: S.gast0, lat: S.lat, lon: S.lon, t0ms: S.t0ms, planets: S.planets };
   function skyKeyOf(k) { return [k.date, k.lat, k.lon, k.tz].join(','); }
-  var EVENT_KEY = skyKeyOf(C.EVENT), skyKey = EVENT_KEY, skyNow = C.EVENT;
+  var EVENT_KEY = skyKeyOf(C.EVENT), skyKey = '', skyNow = C.EVENT;
   function useSky(sky) { // sky: { date, lat, lon, tz, name } or null for the event night
     var key = sky ? skyKeyOf(sky) : EVENT_KEY;
     if (key === skyKey) return;
-    if (key === EVENT_KEY || !C.setSky(S, sky)) { for (var k in EVENT0) S[k] = EVENT0[k]; key = EVENT_KEY; }
+    if (!C.setSky(S, sky || C.EVENT)) { for (var k in EVENT0) S[k] = EVENT0[k]; key = EVENT_KEY; } // the table only covers 18:00–21:30
     skyKey = key; skyNow = key === EVENT_KEY ? C.EVENT : sky;
     renderSkyWhere();
   }
@@ -133,7 +133,7 @@
   // ---------- state ----------
   var st = {
     minutes: 90, speed: 0, lim: 4.6,
-    show: { lines: true, names: true, stars: true, mw: true, dirs: true, art: true },
+    show: { lines: true, names: true, stars: true, mw: true, dirs: true, art: true, trails: false },
     ipdAdj: 0, warp: 0.3, fov: 95,
     mode: 'menu', // menu | vr | screen
     yaw: 150, pitch: 30, zoomFov: 75,
@@ -150,10 +150,10 @@
   }
 
   // ---------- time helpers ----------
-  function clockText(min) {
-    var t = 18 * 60 + Math.round(min);
+  function clockText(min) { // minutes after 18:00, through the night until 06:00
+    var t = (18 * 60 + Math.round(min)) % 1440;
     var h = Math.floor(t / 60), m = t % 60;
-    return '오후 ' + (h - 12) + ':' + (m < 10 ? '0' : '') + m;
+    return (h < 12 ? '오전 ' : '오후 ') + (h % 12 === 0 ? 12 : h % 12) + ':' + (m < 10 ? '0' : '') + m;
   }
   function sunState(sunAlt) {
     if (sunAlt > -6) return '해가 막 졌어요. 하늘이 아직 밝아서 아주 밝은 별만 보여요.';
@@ -341,7 +341,7 @@
       }
     }
     // milky way
-    if (st.show.mw && !GL) {
+    if (opt('mw') && !GL) {
       var mwA = frame.dark * (st.lim >= 6 ? 1 : st.lim >= 4.5 ? 0.45 : 0.12);
       if (mwA > 0.02) {
         c.fillStyle = 'rgba(190,200,255,' + (0.055 * mwA) + ')';
@@ -357,7 +357,7 @@
     var sel = view.sel, selCons = (sel && sel.cons) || guideCons() || (STORY.ev && STORY.ev.highlight) || null;
     LBL = STORY.ev ? STORY.ev.labelAlpha : 1;
     drawArt(view, selCons);
-    if (st.show.lines) {
+    if (opt('lines')) {
       c.lineWidth = Math.max(1, view.f / 420);
       c.strokeStyle = 'rgba(140,170,255,' + (0.38 * LBL).toFixed(3) + ')';
       c.beginPath();
@@ -373,6 +373,7 @@
     }
     drawStoryLines(view);
     drawStoryPointer(view);
+    if (opt('trails')) drawTrails(view);
     // stars
     var lim = frame.lim, sizeK = Math.max(0.85, Math.min(2, Math.sqrt(view.f / 380))) * (view.vr ? 1.25 : 1);
     var M = frame.M, T = frame.T;
@@ -412,19 +413,19 @@
       if (kc) view.boxes.push([kc.x, kc.y, kc.x + kc.w, kc.y + kc.h]);
     }
     c.textBaseline = 'middle';
-    if (st.show.dirs) drawDirs(view, fontPx);
+    if (opt('dirs')) drawDirs(view, fontPx);
     for (var bg = 0; bg < frame.bodies.length; bg++) { // reserve the planet glyphs themselves
       toCam(frame.bodies[bg].v, CV);
       if (proj(view, CV[0], CV[1], CV[2], P)) { var gr = fontPx * (frame.bodies[bg].mag > 5 ? 0.6 : 1.0); view.boxes.push([P[0] - gr, P[1] - gr * 0.6, P[0] + gr, P[1] + gr * 0.6]); }
     }
     var bodiesByMag = frame.bodies.slice().sort(function (a, b) { return a.mag - b.mag; });
     for (var bl = 0; bl < bodiesByMag.length; bl++) bodyLabel(view, bodiesByMag[bl], fontPx);
-    if (st.show.names || selCons) {
+    if (opt('names') || selCons) {
       var consOrder = CONS.slice().sort(function (a, b) { return (b.id === selCons ? 1 : 0) - (a.id === selCons ? 1 : 0); });
       for (var ci = 0; ci < consOrder.length; ci++) {
         var cn = consOrder[ci];
         var isSel = selCons === cn.id;
-        if (!st.show.names && !isSel) continue;
+        if (!opt('names') && !isSel) continue;
         if (altOf(cn.v) < 0.03) continue;
         toCam(cn.v, CV);
         if (!proj(view, CV[0], CV[1], CV[2], P)) continue;
@@ -432,7 +433,7 @@
           isSel ? 'rgba(232,207,138,1)' : 'rgba(170,190,255,0.66)', 'center', isSel);
       }
     }
-    if (st.show.stars) {
+    if (opt('stars')) {
       var starMax = view.vr ? 2.1 : 2.6;
       for (var ni = 0; ni < S.named.length; ni++) {
         var idx = S.named[ni][0];
@@ -475,6 +476,7 @@
       drawVrHud(view, fontPx);
     }
     drawNetOverlay(view, fontPx);
+    if (view.vr && quizOn()) drawQuiz(view, fontPx);
     c.restore();
   }
 
@@ -503,6 +505,39 @@
     c.font = Math.round(fontPx * 0.8) + 'px ' + LABEL_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
     c.fillStyle = 'rgba(214,206,190,0.8)';
     c.fillText('허블 사진 · 2009년, 올해처럼 고리가 옆으로 누운 때', view.cx, view.vr ? view.cy - r - fontPx * 0.9 : view.cy + r + fontPx * 1.1);
+    c.restore();
+  }
+
+  // star trails: where the bright stars were over the past two hours (the Earth turning under the sky)
+  var TRAIL = { key: '', Ms: null };
+  function drawTrails(view) {
+    var steps = 24, span = 120, cam = st.cam, c = ctx;
+    var key = skyKey + ':' + Math.round(st.minutes * 4);
+    if (TRAIL.key !== key) {
+      TRAIL.key = key; TRAIL.Ms = [];
+      for (var k = 0; k <= steps; k++) TRAIL.Ms.push(C.eqjToEnu(S, st.minutes - span * (1 - k / steps)));
+    }
+    var Ms = TRAIL.Ms;
+    c.save();
+    c.lineWidth = Math.max(0.8, view.f / 620);
+    for (var col = 0; col < STAR_COLORS.length; col++) {
+      c.strokeStyle = hexA(STAR_COLORS[col], 0.45);
+      c.beginPath();
+      for (var i = 0; i < NS; i++) {
+        if (SB[i] !== col || SM[i] > 3.6) continue;
+        var v = [SV[3 * i], SV[3 * i + 1], SV[3 * i + 2]], started = false;
+        for (var q = 0; q <= steps; q++) {
+          var e = C.apply(Ms[q], v);
+          if (e[2] < 0) { started = false; continue; }
+          CV[0] = e[0] * cam.r[0] + e[1] * cam.r[1] + e[2] * cam.r[2];
+          CV[1] = e[0] * cam.u[0] + e[1] * cam.u[1] + e[2] * cam.u[2];
+          CV[2] = e[0] * cam.f[0] + e[1] * cam.f[1] + e[2] * cam.f[2];
+          if (!proj(view, CV[0], CV[1], CV[2], P)) { started = false; continue; }
+          if (!started) { c.moveTo(P[0], P[1]); started = true; } else c.lineTo(P[0], P[1]);
+        }
+      }
+      c.stroke();
+    }
     c.restore();
   }
 
@@ -957,10 +992,15 @@
       if (!tg && ARTF[id] < 0.01) delete ARTF[id];
     }
   }
+  // what to draw: the presenter's switch wins while connected, otherwise this phone's menu
+  function opt(k) {
+    if (NET.room && SYNC.has && SYNC.disp && typeof SYNC.disp[k] === 'boolean') return SYNC.disp[k];
+    return !!st.show[k];
+  }
   function artOn() {
     if (artSlow) return false;
     if (NET.room && SYNC.has && SYNC.art != null) return SYNC.art;
-    return st.show.art;
+    return opt('art');
   }
   var ACAM = [0, 0, 0], APTS = [];
   for (var api = 0; api < 9; api++) APTS.push([0, 0, 0]);
@@ -1184,6 +1224,8 @@
     if (!s || s.k !== 'state') return;
     SYNC.art = typeof s.art === 'boolean' ? s.art : null;
     SYNC.sky = C.skyOk(s.sky) ? s.sky : null;
+    SYNC.disp = s.disp && typeof s.disp === 'object' ? s.disp : null;
+    SYNC.quiz = s.quiz && s.quiz.n ? s.quiz : null;
     setTimeout(renderSkyWhere, 0);
     SYNC.story = s.story && s.story.show ? { show: s.story.show, i: s.story.i | 0, t0: Date.now() - (s.story.el || 0) } : null;
     SYNC.view = s.view ? { on: !!s.view.on, yaw: +s.view.yaw || 0, pitch: +s.view.pitch || 0, fov: +s.view.fov || 75 } : null;
@@ -1202,8 +1244,7 @@
   function syncActive() { return NET.room && SYNC.has && SYNC.phase !== 'idle' && SYNC.phase !== 'end'; }
   function syncMinutes() {
     var m = SYNC.base + (Date.now() - SYNC.at) / 60000 * SYNC.speed;
-    if (m > 180) m = 30 + ((m - 30) % 150);
-    return Math.max(30, m);
+    return ((m % 720) + 720) % 720;
   }
   function renderNetChip() {
     var chip = $('netChip'); if (!chip) return;
@@ -1314,6 +1355,127 @@
       c.restore(); c.globalAlpha = 1;
       cueText(label + ' · ' + ang + '°', ex - Math.cos(a) * fontPx * 0.8, ey - Math.sin(a) * fontPx * 0.8 + (Math.sin(a) >= 0 ? -fontPx * 2.4 : fontPx * 2.4), fontPx);
     }
+  }
+
+  // ---------- quiz: the presenter opens a question; answer by looking (VR) or tapping (screen mode) ----------
+  // choice: answer cards hang in the sky in front of where you looked when the question opened; stare ~1.6 s to pick.
+  // find: look at the named star / constellation / planet for ~2 s. The server only counts answers; the phone checks them.
+  var QZ = { n: 0, mine: -1, found: false, anchor: null, dwell: -1, dwellT: 0, findT: 0, dom: '', last: 0 };
+  var QZ_DWELL = 1.6, QZ_FIND = 2.0;
+  function quizOn() { return !!(NET.room && SYNC.has && SYNC.quiz) && st.mode !== 'menu' && !introCovers(); }
+  function quizTargetVec(t) {
+    if (!t) return null;
+    if (t.kind === 'star') return starVecByName(t.id);
+    if (t.kind === 'cons') { for (var i = 0; i < CONS.length; i++) if (CONS[i].id === t.id) return CONS[i].v; return null; }
+    if (t.kind === 'body') return S.planets[t.id] ? C.radec2vec.apply(null, C.bodyRaDec(S, t.id, st.minutes)) : null;
+    if (t.kind === 'radec') { var p = String(t.id).split(','); return p.length === 2 ? C.radec2vec(+p[0], +p[1]) : null; }
+    return null;
+  }
+  function quizSend(a) { if (NET.ws && NET.ws.readyState === 1) { try { NET.ws.send(JSON.stringify({ k: 'ans', n: QZ.n, a: a })); } catch (e) {} } }
+  function quizCards() { // ENU directions of the answer cards around the anchor
+    // a 2 x 2 grid (one row for two answers), 26° apart across and 11° apart down, measured on the sky
+    var q = SYNC.quiz, n = q.opts.length, out = [], an = QZ.anchor;
+    for (var i = 0; i < n; i++) {
+      var col = i % 2, row = n > 2 ? Math.floor(i / 2) : 0;
+      var al = an.alt - 2 - row * 11, az = an.az + (col - 0.5) * 26 / Math.cos(al * D2R);
+      out.push([Math.sin(az * D2R) * Math.cos(al * D2R), Math.cos(az * D2R) * Math.cos(al * D2R), Math.sin(al * D2R)]);
+    }
+    return out;
+  }
+  function angFromView(e) { var f = st.cam.f; return Math.acos(Math.max(-1, Math.min(1, e[0] * f[0] + e[1] * f[1] + e[2] * f[2]))) / D2R; }
+  function quizTick() {
+    var now = performance.now(), dt = Math.min(0.5, (now - (QZ.last || now)) / 1000); QZ.last = now; // real time, even on slow phones
+    var q = quizOn() ? SYNC.quiz : null;
+    if (!q) { if (QZ.dom) { $('quizBox').hidden = true; QZ.dom = ''; } return; }
+    if (q.n !== QZ.n) { QZ.n = q.n; QZ.mine = -1; QZ.found = false; QZ.anchor = null; QZ.dwell = -1; QZ.dwellT = 0; QZ.findT = 0; }
+    if (!QZ.anchor && st.cam) { var aa = C.enuToAltAz(st.cam.f); QZ.anchor = { az: aa.az, alt: Math.max(12, Math.min(55, aa.alt)) }; }
+    if (q.st === 'open') {
+      if (q.type === 'choice' && st.mode === 'vr') {
+        var cards = quizCards(), hit = -1;
+        for (var i = 0; i < cards.length; i++) if (angFromView(cards[i]) < 5.5) hit = i;
+        if (hit !== QZ.dwell) { QZ.dwell = hit; QZ.dwellT = 0; }
+        else if (hit >= 0 && hit !== QZ.mine) { QZ.dwellT += dt; if (QZ.dwellT >= QZ_DWELL) { QZ.mine = hit; quizSend(hit); } }
+      } else if (q.type === 'find' && !QZ.found) {
+        var v = quizTargetVec(q.target);
+        if (v) {
+          var tol = q.target.kind === 'cons' ? 10 : 3.5;
+          if (angFromView(C.apply(frame.M, v)) < tol) { QZ.findT += dt; if (QZ.findT >= QZ_FIND) { QZ.found = true; quizSend(1); } }
+          else QZ.findT = Math.max(0, QZ.findT - dt * 2);
+        }
+      }
+    }
+    if (st.mode === 'screen') quizDom(q); else if (QZ.dom) { $('quizBox').hidden = true; QZ.dom = ''; }
+  }
+  function quizResult(q) {
+    if (q.type === 'find') return q.st === 'reveal' ? (QZ.found ? '찾았어요! ' : '여기 있어요. ') + (q.ex || '') : QZ.found ? '찾았어요! 정답 공개를 기다려요.' : (QZ.findT > 0.2 ? '조금만 더 바라봐요…' : '하늘을 둘러보며 찾아보세요. 찾으면 가운데 동그라미로 2초 바라봐요.');
+    if (q.st === 'reveal') return (QZ.mine === q.ans ? '정답! ' : QZ.mine >= 0 ? '아쉬워요. 정답은 ‘' + q.opts[q.ans] + '’. ' : '정답은 ‘' + q.opts[q.ans] + '’. ') + (q.ex || '');
+    return QZ.mine >= 0 ? '‘' + q.opts[QZ.mine] + '’을(를) 골랐어요. 바꿔도 돼요.' : '';
+  }
+  function quizDom(q) { // screen mode: plain buttons at the bottom
+    var key = q.n + q.st + QZ.mine + (QZ.found ? 'f' : '') + Math.round(QZ.findT * 4);
+    if (key === QZ.dom) return; QZ.dom = key;
+    $('quizBox').hidden = false; $('qzQ').textContent = q.q;
+    var box = $('qzOpts'); box.innerHTML = '';
+    if (q.type === 'choice') q.opts.forEach(function (o, i) {
+      var b = document.createElement('button'); b.type = 'button'; b.textContent = (i + 1) + '. ' + o;
+      b.setAttribute('aria-pressed', QZ.mine === i ? 'true' : 'false');
+      if (q.st === 'reveal') b.className = i === q.ans ? 'right' : 'wrong';
+      else b.addEventListener('click', function () { QZ.mine = i; quizSend(i); QZ.dom = ''; });
+      box.appendChild(b);
+    });
+    $('qzMsg').textContent = quizResult(q);
+  }
+  function drawQuiz(view, fontPx) { // VR: question at the top of each eye, answer cards in the sky
+    var c = ctx, q = SYNC.quiz, cam = st.cam, rad = view.R;
+    c.save();
+    if (q.type === 'choice' && QZ.anchor) {
+      var cards = quizCards(), w = 23 * D2R * view.f, h = 9 * D2R * view.f, fs = Math.max(9, Math.min(fontPx * 0.9, w / 7.5));
+      for (var i = 0; i < cards.length; i++) {
+        var e = cards[i];
+        CV[0] = e[0] * cam.r[0] + e[1] * cam.r[1] + e[2] * cam.r[2]; CV[1] = e[0] * cam.u[0] + e[1] * cam.u[1] + e[2] * cam.u[2]; CV[2] = e[0] * cam.f[0] + e[1] * cam.f[1] + e[2] * cam.f[2];
+        if (!proj(view, CV[0], CV[1], CV[2], P)) continue;
+        var right = q.st === 'reveal' && i === q.ans, dim = q.st === 'reveal' && i !== q.ans;
+        c.globalAlpha = dim ? 0.45 : 1;
+        c.fillStyle = right ? 'rgba(47,107,71,0.96)' : QZ.mine === i ? 'rgba(232,207,138,0.96)' : 'rgba(14,15,20,0.93)';
+        roundRect(P[0] - w / 2, P[1] - h / 2, w, h, fontPx * 0.5); c.fill();
+        c.strokeStyle = 'rgba(232,207,138,0.5)'; c.lineWidth = 1; c.stroke();
+        c.fillStyle = QZ.mine === i && !right ? '#2a1d00' : '#f1f2f5';
+        c.font = Math.round(fs) + 'px ' + LABEL_FONT; c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.fillText((i + 1) + '. ' + q.opts[i], P[0], P[1], w - fs);
+        if (q.st === 'open' && QZ.dwell === i && i !== QZ.mine && QZ.dwellT > 0.05) { // filling bar while you stare
+          c.fillStyle = 'rgba(232,207,138,0.95)';
+          c.fillRect(P[0] - w / 2 + 6, P[1] + h / 2 - 5, (w - 12) * Math.min(1, QZ.dwellT / QZ_DWELL), 3);
+        }
+      }
+      c.globalAlpha = 1;
+    }
+    if (q.type === 'find' && (q.st === 'reveal' || QZ.found)) { // circle the target
+      var v = quizTargetVec(q.target);
+      if (v) { toCam(v, CV); if (proj(view, CV[0], CV[1], CV[2], P)) {
+        c.strokeStyle = '#7fe0a0'; c.lineWidth = 2; c.beginPath(); c.arc(P[0], P[1], q.target.kind === 'cons' ? fontPx * 3 : fontPx * 1.2, 0, Math.PI * 2); c.stroke();
+        c.fillStyle = '#7fe0a0'; c.font = Math.round(fontPx) + 'px ' + LABEL_FONT; c.textAlign = 'center'; c.textBaseline = 'bottom';
+        c.fillText(q.target.name || '', P[0], P[1] - (q.target.kind === 'cons' ? fontPx * 3.2 : fontPx * 1.4));
+      } }
+    }
+    if (q.type === 'find' && q.st === 'open' && !QZ.found && QZ.findT > 0.05) { // ring around the reticle fills up
+      c.strokeStyle = 'rgba(127,224,160,0.95)'; c.lineWidth = 3;
+      c.beginPath(); c.arc(view.cx, view.cy, fontPx * 1.1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, QZ.findT / QZ_FIND)); c.stroke();
+    }
+    // question and result, head-locked at the top of the eye
+    var bw = rad * 1.45, msg = quizResult(q);
+    c.font = Math.round(fontPx * 0.85) + 'px ' + BODY_FONT;
+    var mlines = msg ? wrapLines(msg, bw - fontPx * 1.4).slice(0, 3) : [];
+    c.font = Math.round(fontPx * 1.0) + 'px ' + LABEL_FONT;
+    var lines = wrapLines(q.q, bw - fontPx * 1.4);
+    var lh = fontPx * 1.25, bh = fontPx * 1.0 + lh * (lines.length + mlines.length) + (mlines.length ? fontPx * 0.4 : 0), by = view.cy - rad * 0.88;
+    c.fillStyle = 'rgba(14,15,20,0.93)'; roundRect(view.cx - bw / 2, by, bw, bh, fontPx * 0.6); c.fill();
+    c.strokeStyle = 'rgba(232,207,138,0.4)'; c.lineWidth = 1; c.stroke();
+    c.textAlign = 'center'; c.textBaseline = 'top';
+    c.fillStyle = '#e8cf8a';
+    for (var j = 0; j < lines.length; j++) c.fillText(lines[j], view.cx, by + fontPx * 0.5 + j * lh);
+    c.font = Math.round(fontPx * 0.85) + 'px ' + BODY_FONT; c.fillStyle = 'rgba(241,242,245,0.92)';
+    for (var k = 0; k < mlines.length; k++) c.fillText(mlines[k], view.cx, by + fontPx * 0.9 + (lines.length + k) * lh);
+    c.restore();
   }
 
   // ---------- opening film (체험 시작) ----------
@@ -1475,7 +1637,7 @@
     if (STORY.ev) { st.minutes = STORY.ev.minutes; synced = true; }
     if (!synced && st.speed > 0 && st.mode !== 'menu') {
       st.minutes += dt * st.speed / 60;
-      if (st.minutes > 180) st.minutes = 30;
+      if (st.minutes >= 720) st.minutes -= 720;
       syncTime();
     }
     if (followOn() && st.mode === 'screen') { st.yaw = SYNC.view.yaw; st.pitch = SYNC.view.pitch; st.zoomFov = SYNC.view.fov; }
@@ -1494,7 +1656,8 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     if (GL && !hidden) ctx.clearRect(0, 0, W, H);
     else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
-    var sel = (st.mode === 'menu' || (st.mode === 'vr' && PANEL.open) || STORY.ev || introCovers()) ? null : pickTarget();
+    quizTick();
+    var sel = (st.mode === 'menu' || (st.mode === 'vr' && PANEL.open) || STORY.ev || introCovers() || quizOn()) ? null : pickTarget();
     updateArtFocus(dt, sel);
     if (st.mode === 'vr') {
       var half = W / 2;
@@ -1531,7 +1694,7 @@
   function glSky(views) {
     if (!GL) return;
     var t = Math.max(0, Math.min(1, (-frame.sunAlt - 4) / 14));
-    var lim = frame.lim, gain = st.show.mw ? frame.dark * frame.dark * Math.max(0.1, Math.min(1, (lim - 3.0) / 3.1)) * 0.95 : 0;
+    var lim = frame.lim, gain = opt('mw') ? frame.dark * frame.dark * Math.max(0.1, Math.min(1, (lim - 3.0) / 3.1)) * 0.95 : 0;
     var ml = frame.moonLight;
     gain *= 1 - 0.75 * ml;
     GL.draw(views, frame.T, frame.M, [(mix(34, 6, t) + 14 * ml) / 255, (mix(52, 7, t) + 20 * ml) / 255, (mix(98, 12, t) + 34 * ml) / 255], gain * 0.7, {
@@ -1786,6 +1949,10 @@
     }, 120);
     window.addEventListener('message', function (ev) {
       var d = ev.data || {};
+      if (d.type === 'osong-setview') { // the presenter's 'move to' controls
+        st.yaw = +d.yaw || 0; st.pitch = Math.max(-10, Math.min(89, +d.pitch || 0)); st.zoomFov = Math.max(15, Math.min(120, +d.fov || 75));
+        return;
+      }
       if (d.type === 'osong-lookat') {
         var sp = spotById(d.id); if (!sp) return;
         var aa = spotAltAz(sp, st.minutes);
@@ -1794,5 +1961,5 @@
     });
   }
   requestAnimationFrame(loop);
-  window.__sky = { intro: INTRO,  st: st, frame: function () { return frame; } };
+  window.__sky = { intro: INTRO,  st: st, frame: function () { return frame; }, qz: QZ, polar: function () { var v = starVecByName('북극성'); return v ? C.enuToAltAz(C.apply(frame.M, v)) : null; } };
 })();

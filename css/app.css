@@ -201,3 +201,15 @@ input[type=date] {
   border: 1px solid var(--line); background: var(--deep); color: var(--ink); color-scheme: dark; min-height: 36px;
 }
 .chips.locked { opacity: 0.45; pointer-events: none; }
+/* quiz (screen mode; in VR the cards are drawn in the sky) */
+#quizBox { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); z-index: 6; pointer-events: auto;
+  background: rgba(14, 15, 20, 0.94); border: 1px solid rgba(232, 207, 138, 0.35); border-radius: 14px; padding: 14px 16px; }
+#qzQ { margin: 0 0 10px; font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.45; }
+#qzOpts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#qzOpts button { appearance: none; cursor: pointer; border-radius: 10px; padding: 10px 12px; font: 600 15px var(--font-body);
+  border: 1px solid var(--line); background: var(--deep); color: var(--ink); text-align: left; }
+#qzOpts button[aria-pressed="true"] { background: var(--star); color: var(--star-ink); border-color: transparent; }
+#qzOpts button.right { background: #2f6b47; color: #fff; border-color: transparent; }
+#qzOpts button.wrong { opacity: 0.45; }
+#qzMsg { margin: 10px 0 0; font-size: 14px; color: var(--dusk); line-height: 1.5; }
+#qzMsg:empty { display: none; }

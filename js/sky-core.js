@@ -53,7 +53,7 @@ var SkyCore = (function () {
   // Re-point the sky at another evening and place with astronomy-engine (vendor/astronomy.browser.min.js).
   // sky: { date: 'YYYY-MM-DD', tz: hours east of UTC, lat, lon }. Minutes still count from 18:00 local time.
   // Rebuilds what js/sky-data.js holds for 2026-11-01 at Osong: precession/nutation, sidereal time at 18:00,
-  // and topocentric J2000 positions (with aberration) of the Sun, Moon and planets every 10 minutes until 21:30.
+  // and topocentric J2000 positions (with aberration) of the Sun, Moon and planets every 10 minutes until 06:00.
   var BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
   function setSky(S, sky) {
     var A = typeof Astronomy !== 'undefined' ? Astronomy : null;
@@ -68,7 +68,7 @@ var SkyCore = (function () {
     var planets = {}; // a new object, so a saved copy of the event night's table stays intact
     BODIES.forEach(function (name) {
       var p = [];
-      for (var i = 0; i < 22; i++) {
+      for (var i = 0; i <= 72; i++) {
         var eq = A.Equator(name, t.AddDays(i * 10 / 1440), obs, false, true);
         p.push(Math.round(eq.ra * 15 * 1000) / 1000, Math.round(eq.dec * 1000) / 1000);
       }
