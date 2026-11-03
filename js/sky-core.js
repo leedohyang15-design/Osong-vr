@@ -50,6 +50,44 @@ var SkyCore = (function () {
     if (ra < 0) ra += 360;
     return [ra, d0 + (d1 - d0) * f];
   }
-  return { D2R: D2R, radec2vec: radec2vec, eqjToEnu: eqjToEnu, mul: mul, apply: apply, enuToAltAz: enuToAltAz, bodyRaDec: bodyRaDec };
+  // Re-point the sky at another evening and place with astronomy-engine (vendor/astronomy.browser.min.js).
+  // sky: { date: 'YYYY-MM-DD', tz: hours east of UTC, lat, lon }. Minutes still count from 18:00 local time.
+  // Rebuilds what js/sky-data.js holds for 2026-11-01 at Osong: precession/nutation, sidereal time at 18:00,
+  // and topocentric J2000 positions (with aberration) of the Sun, Moon and planets every 10 minutes until 21:30.
+  var BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
+  function setSky(S, sky) {
+    var A = typeof Astronomy !== 'undefined' ? Astronomy : null;
+    if (!A || !sky) return false;
+    var d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(sky.date || '');
+    if (!d) return false;
+    var t0 = Date.UTC(+d[1], +d[2] - 1, +d[3], 18, 0, 0) - (sky.tz || 0) * 3600000;
+    var t = new A.AstroTime(new Date(t0)), obs = new A.Observer(sky.lat, sky.lon, 0);
+    S.t0ms = t0; S.lat = sky.lat; S.lon = sky.lon;
+    S.rot = A.Rotation_EQJ_EQD(t).rot;
+    S.gast0 = A.SiderealTime(t);
+    var planets = {}; // a new object, so a saved copy of the event night's table stays intact
+    BODIES.forEach(function (name) {
+      var p = [];
+      for (var i = 0; i < 22; i++) {
+        var eq = A.Equator(name, t.AddDays(i * 10 / 1440), obs, false, true);
+        p.push(Math.round(eq.ra * 15 * 1000) / 1000, Math.round(eq.dec * 1000) / 1000);
+      }
+      var mag = name === 'Sun' ? -26.8 : A.Illumination(name, t).mag;
+      planets[name] = { p: p, mag: Math.round(mag * 10) / 10 };
+    });
+    S.planets = planets;
+    return true;
+  }
+  // places offered in the menus (tz: hours east of UTC); 'here' uses the phone's location and clock
+  var PLACES = {
+    osong: { name: '오송호수공원', lat: 36.635, lon: 127.325, tz: 9 },
+    seoul: { name: '서울', lat: 37.5665, lon: 126.978, tz: 9 },
+    jeju: { name: '제주', lat: 33.4996, lon: 126.5312, tz: 9 }
+  };
+  var EVENT = { date: '2026-11-01', place: 'osong', lat: 36.635, lon: 127.325, tz: 9 }; // the night js/sky-data.js was built for
+  function skyOk(k) {
+    return !!(k && /^\d{4}-\d{2}-\d{2}$/.test(k.date) && isFinite(k.lat) && Math.abs(k.lat) <= 90 && isFinite(k.lon) && Math.abs(k.lon) <= 180 && isFinite(k.tz) && Math.abs(k.tz) <= 14);
+  }
+  return { PLACES: PLACES, EVENT: EVENT, skyOk: skyOk, D2R: D2R, radec2vec: radec2vec, eqjToEnu: eqjToEnu, mul: mul, apply: apply, enuToAltAz: enuToAltAz, bodyRaDec: bodyRaDec, setSky: setSky };
 })();
 if (typeof module !== 'undefined') module.exports = SkyCore;

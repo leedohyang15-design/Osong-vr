@@ -1,70 +1,63 @@
-# 별이 빛나는 밤에 — 오송호수공원 천체관측회 VR
+# 별이 빛나는 밤에 VR
 
-2026년 11월 1일 저녁 오송호수공원(북위 36.64°, 동경 127.33°) 하늘을 휴대폰 VR로 보여 주는 웹 페이지예요.
-진행자 노트북의 QR로 참여자들이 접속하고, 진행자가 장면을 넘기면 모든 휴대폰이 같은 장면으로 넘어가요.
+오송호수공원 천체관측회(2026. 11. 1)를 위해 만든 휴대폰 VR 플라네타리움이에요. 비가 와서 관측을 못 할 때 쓰는 대체 프로그램으로 시작했고, 이제는 아무 날짜·장소의 저녁 하늘도 보여 줘요.
+참가자는 진행자 노트북의 QR로 접속하고, 진행자가 이야기 장면을 넘기거나 같이 볼 곳을 고르면 모든 휴대폰이 함께 움직여요.
 
 | 주소 | 누가 | 하는 일 |
 | --- | --- | --- |
-| `index.html` | 참여자 휴대폰 | VR(카드보드) / 화면 모드로 하늘 보기. 별자리를 1.5초 바라보면 별자리 그림이 나타나고 설명이 자동으로 흘러가요. |
-| `host.html` | 진행자 노트북 | 접속 QR, 접속 인원, 장면 넘기기, 장면별 대본과 참여 질문, 참여자 화면 미리보기 |
-| `server/` | 인터넷 | 진행자 → 휴대폰 동기화 중계 서버 (Render 무료) |
+| `index.html` | 참가자 휴대폰 | VR(카드보드) / 화면 모드로 하늘 보기. 별자리를 바라보면 그림과 설명이 나와요. 메뉴에서 날짜·장소를 고를 수 있어요. |
+| `admin.html` | 진행자 노트북 | 비밀번호로 들어가요. 오프닝 영상, 이야기 진행, 설명/자유 관찰 타이머, 같이 볼 곳, 화면 따라오게 하기, 하늘 날짜·장소, 참가자 화면 미리보기 |
+| `worker.js` | 인터넷 | 동기화 서버 (Cloudflare Worker + Durable Object) |
 
-## 처음 한 번: 배포
+## 어떻게 동작하나요
+- **하늘 계산**: 별 5,044개(6.5등급까지)와 88개 별자리 선은 J2000 적도좌표로 들고 있어요. 매 프레임 "J2000 → 관측 날짜의 적도(세차·장동) → 그 장소의 지평좌표" 회전 행렬 하나를 만들어 모든 별에 곱해요(`js/sky-core.js`).
+  - 2026-11-01 오송은 미리 계산한 표(`js/sky-data.js`)를 써요.
+  - 다른 날짜·장소는 astronomy-engine으로 그 자리에서 다시 계산해요(`SkyCore.setSky`). 행성·달·태양은 지표면 관측자 기준, 광행차 포함 위치예요. 11월 1일 값으로 미리 계산한 표와 비교했을 때 차이는 0.0001° 이하예요.
+- **화면에 그리기**: 카메라 방향으로 투영(gnomonic)한 뒤, VR에서는 카드보드 렌즈의 휘어짐을 미리 반대로 휘어 그려요(`s = 1/√(1 + k·r²/R²)`). 두 눈 화면은 같은 하늘을 눈 간격만큼 떨어진 중심에 그려요.
+- **은하수**: NASA SVS Deep Star Maps 2020 사진 지도를 WebGL 셰이더가 픽셀마다 하늘 방향으로 되돌려 찾아 그려요. 렌즈 보정도 셰이더가 거꾸로 풀어요(`js/skygl.js`). WebGL이 없으면 윤곽 다각형으로 대신 그려요.
+- **밝기**: 태양 고도로 박명(하늘색·보이는 별 등급)을 정하고, 지평선 근처는 대기 감광으로 어둡게, 달이 높고 밝으면 달빛으로 흐린 별이 사라져요. 달은 실제 위상과 밝은 쪽 방향으로 그려요.
+- **동기화**: 진행자 명령은 서버의 상태 하나로 모이고, 휴대폰은 그 상태(장면 번호와 시작 후 지난 시간)를 받아 각자 같은 장면을 계산해요. 그래서 늦게 들어온 폰도 같은 순간을 봐요.
 
-### 1. 사이트 (GitHub Pages)
-저장소 **Settings → Pages**에서 브랜치 `main`, 폴더 `/ (root)`. 휴대폰 기울기 센서는 HTTPS에서만 동작해요.
+## 배포
+1. **사이트**: GitHub Pages(브랜치 `main`, 폴더 `/`). 휴대폰 기울기 센서는 HTTPS에서만 동작해요.
+2. **동기화 서버**: `wrangler deploy` (Cloudflare 계정 필요). 진행자 비밀번호는 `wrangler secret put ADMIN_KEY`로 넣어요.
+   - 날짜·장소 동기화(`sky` 명령)는 이번에 서버에 추가했어요. **서버를 다시 배포해야** 진행자가 고른 날짜가 휴대폰에 전달돼요. 배포 전에도 나머지는 그대로 동작하고, 참가자가 각자 메뉴에서 날짜를 고를 수는 있어요.
+   - 서버 주소는 `js/app.js`, `js/admin.js`의 `SERVER`예요. 허용 출처는 `worker.js`의 `ALLOWED`(*.github.io, localhost)예요.
 
-### 2. 동기화 서버 (Render)
-휴대폰끼리 직접 연결하는 방식은 LTE에서 막혀서, 작은 중계 서버를 둬요.
-
-1. https://render.com 에 GitHub 계정으로 가입
-2. **New + → Blueprint** → 이 저장소 선택 → `render.yaml`이 읽히면 **Apply** (서비스 이름 `osong-vr-sync`, Free)
-3. 배포가 끝나면 주소가 `https://osong-vr-sync.onrender.com` 처럼 나와요.
-   이름이 다르면 `js/config.js`의 `SYNC_URL`을 `wss://<그 주소>`로 바꿔 커밋해 주세요.
-
-무료 서버는 15분 동안 아무도 안 쓰면 잠들어요. **관측회 시작 몇 분 전에 진행자 화면을 먼저 열어 두면** 서버가 깨어나요(처음엔 최대 1분).
-
-## 관측회 당일
-
-1. 노트북에서 `https://<아이디>.github.io/Osong-vr/host.html` → "준비됐어요"가 뜨는지 확인
-2. `Q` 키로 QR을 크게 띄워 참여자 접속 → "명 접속 중" 숫자 확인
-3. **시작** → 장면마다 짧은 연출(5~17초)이 끝나면 화면이 멈춰 기다려요. 대본과 "참여" 질문을 보며 이야기하고, `→`/스페이스로 다음 장면
-- 노트북·휴대폰 모두 인터넷 필요(LTE 가능). 진행자 화면은 한 창만 열어 두세요(같은 방을 다른 노트북이 쓰면 거부돼요).
-- 쇼 중 VR 화면은 하늘이 천천히 돌아 대상이 정면에 오고, 화면 모드는 카메라가 자동으로 움직여요.
-- 관측할 때는 메뉴의 **야간 적색 모드**를 켜 두면 눈의 암적응이 덜 깨져요.
-
-## 쇼 고치기·추가하기
-`js/shows.js`의 `SHOWS`. 장면마다 `view`(끝나는 시점), `move`, `fx`(연출: `timelapse`, `lightsOut`, `labels`, `lines`, `art`, `trails`, `pointer`, `eyepiece`), `title`/`sub`(휴대폰 자막), `cue`(참여 질문), `note`(진행자 대본). 형식은 파일 맨 위 주석에 있어요.
+## 이야기 고치기
+`story.js` 하나만 고치면 두 화면에 모두 반영돼요. 장면 형식은 파일 맨 위 주석에 있어요(`view`, `move`, `fx`, `keepArt`, `title`/`sub`, `cue`, `note`). 연출(`fx`)은 `timelapse`, `lightsOut`, `labels`, `lines`, `art`, `pointer`, `eyepiece`(망원경 시야에 허블 토성 사진)예요.
+이야기는 언제나 관측회 날(2026-11-01) 오송 하늘로 진행돼요. 장면의 대상과 시각이 그 밤에 맞춰져 있기 때문이에요.
 
 ## 로컬에서 시험하기
 ```
-cd server && npm install && node server.js        # ws://localhost:8080
-python3 -m http.server 8000                       # 다른 터미널, 저장소 루트에서
+python3 -m http.server 8765                      # 저장소 루트에서
+printf 'ADMIN_KEY=test1234\n' > .dev.vars
+npx wrangler dev --port 8787 --local             # 다른 터미널
 ```
-`http://localhost:8000/host.html?sync=ws://localhost:8080` 을 열면 QR 주소에도 `sync`가 붙어요.
-`index.html?vrtest` 는 센서 없는 컴퓨터에서도 VR 화면으로 들어가게 해 줘요.
+`http://localhost:8765/admin.html?server=ws://localhost:8787` (비밀번호 test1234) 와 `http://localhost:8765/?r=<방 코드>&server=ws://localhost:8787`.
 
 ## 파일
 ```
-index.html, host.html   페이지
-css/                    디자인
-js/config.js            동기화 서버 주소
-js/sky-data.js          별 5,044개, 별자리 선, 은하수, 행성 위치 (2026-11-01 18:00–21:30 KST)
-js/engine.js            하늘 그리기 (VR 양안 + 렌즈 보정, 은하수, 지평선, 라벨, 별자리 그림, 쇼 연출)
-js/figures-data.js      별자리 그림 85개의 기준 별 좌표 (tools/build-figures.js로 생성)
-assets/figures/         별자리 그림 (Johan Meuris / Stellarium, Free Art License)
-assets/saturn.webp      토성 사진 (허블, 고리가 옆으로 누운 2009년)
-assets/milkyway_4k.jpg  은하수 사진 지도 (NASA SVS Deep Star Maps 2020), js/skygl.js가 WebGL로 그림
-js/content.js           별자리·별·행성 설명
-js/shows.js             쇼 대본과 장면 계산
-js/sync.js, server/     동기화 (서버 시계 기준, 자동 재연결)
-js/app.js, js/host.js   참여자 / 진행자 화면 동작
-vendor/qrcode.js        qrcode-generator 1.4.4 (MIT)
+index.html, admin.html   참가자 / 진행자 화면
+sim.html                 예전 미리보기 주소 → admin.html로 이동
+story.js                 이야기 장면과 진행자 대본 (두 화면이 같이 씀)
+art.js                   별자리 그림 (Stellarium modern, 테마 색으로 다시 칠함)
+js/sky-data.js           별·별자리 선·은하수 윤곽, 2026-11-01 오송의 행성 위치 표
+js/sky-core.js           하늘 좌표 계산, 다른 날짜·장소 계산(setSky), 장소 목록
+js/skygl.js              WebGL 하늘색 + NASA 은하수
+js/app.js                참가자 화면 (그리기, VR, 응시, 이야기 재생, 오프닝 영상, 동기화)
+js/admin.js              진행자 화면
+css/                     디자인
+vendor/                  qrcode-generator (MIT), astronomy-engine 2.1.19 (MIT)
+assets/                  은하수 사진 지도, 토성 사진, 오프닝 영상
+tools/                   은하수·토성 이미지 만드는 스크립트
+worker.js, wrangler.toml 동기화 서버
 ```
+예전 버전(진행자 쇼 + Render 서버, 2026-11-01 관측회 때 쓴 것)은 `osong-1101` 브랜치에 남아 있어요.
 
-## 출처
-- 별자리 그림: Johan Meuris, Stellarium western sky culture — Free Art License
-- 은하수 사진 지도: NASA/Goddard Space Flight Center Scientific Visualization Studio, Deep Star Maps 2020 (Gaia DR2: ESA/Gaia/DPAC) — `tools/build-milkyway.py`로 변환, WebGL이 없으면 윤곽 데이터로 대신 그려요
-- 토성 사진: NASA, ESA and the Hubble Heritage Team (STScI/AURA), 2009 — CC BY 4.0, `tools/build-saturn.py`로 배경을 투명하게 변환
-- 별·별자리 선·은하수 윤곽: d3-celestial (Olaf Frohn, BSD-3-Clause)
-- 행성 위치: astronomy-engine으로 계산
+## 출처와 라이선스
+- 별자리 그림: Johan Meuris / Stellarium 팀 "modern" sky culture 일러스트 (Free Art License 1.3, https://artlibre.org/licence/lal/en/). 크기를 줄이고 색을 바꿔 변형했으며 `art.js`의 그림도 같은 Free Art License를 따라요.
+- 은하수 사진 지도: NASA/Goddard Space Flight Center Scientific Visualization Studio, Deep Star Maps 2020 (Gaia DR2: ESA/Gaia/DPAC). `tools/build-milkyway.py`로 변환.
+- 토성 사진: NASA, ESA and the Hubble Heritage Team (STScI/AURA), 2009 — CC BY 4.0. `tools/build-saturn.py`로 배경을 투명하게 변환.
+- 별·별자리 선 데이터: d3-celestial (Olaf Frohn, BSD-3-Clause). 행성 위치 계산: astronomy-engine (Don Cross, MIT).
+- 함께 만든 저장소: https://github.com/subleemation/vr_planetarium
